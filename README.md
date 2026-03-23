@@ -53,15 +53,36 @@ You can also use an untracked local vars file:
 
 ## Fast path
 
-If you want a single command that uses the repo defaults, keeps the organization as `default`, and lets you choose how many profiles to derive, use this flow:
+If you want a simple default flow that keeps the organization as `default`, use these commands:
+
+Create the standalone policy set and server profile template:
 
 ```bash
 cd "$REPO_HOME"
 export INTERSIGHT_API_ENDPOINT="https://intersight.com"
 
-ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml   -e intersight_apply_changes=true   -e intersight_organization=default   -e intersight_create_organization_if_missing=false   -e intersight_include_default_organization=false   -e intersight_policy_name_prefix="auto-"   -e intersight_template_name_prefix="auto-"   -e intersight_profile_name_prefix="auto-"
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=default \
+  -e intersight_create_organization_if_missing=false \
+  -e intersight_include_default_organization=false \
+  -e intersight_policy_name_prefix="auto-" \
+  -e intersight_template_name_prefix="auto-" \
+  -e intersight_profile_name_prefix="auto-"
+```
 
-ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/configure_server_profiles.yml   -e intersight_apply_changes=true   -e intersight_organization=default   -e intersight_number_of_profiles=3   -e intersight_policy_name_prefix="auto-"   -e intersight_template_name_prefix="auto-"   -e intersight_profile_name_prefix="auto-"
+Once the server profile template has been created, users may also derive profiles manually from the auto-created template in the Intersight dashboard and associate them with claimed VAST nodes in Intersight.
+
+Derive profiles from the template with the automation flow:
+
+```bash
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/configure_server_profiles.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=default \
+  -e intersight_number_of_profiles=3 \
+  -e intersight_policy_name_prefix="auto-" \
+  -e intersight_template_name_prefix="auto-" \
+  -e intersight_profile_name_prefix="auto-"
 ```
 
 Change these CLI values as needed:
