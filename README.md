@@ -22,6 +22,24 @@ The automation is driven from `group_vars/all.yml`.
 - `group_vars/all.yml`: main user inputs
 - `requirements.yml`: required Ansible collection
 
+## How to Clone and Use This Repository
+
+Users who only want to use the stable repository can start with:
+
+```bash
+git clone https://github.com/<your-github-username>/vast_infra.git
+cd vast_infra
+
+export REPO_HOME="$PWD"
+export INTERSIGHT_API_KEY_ID="your-api-key-id"
+export INTERSIGHT_API_PRIVATE_KEY_PATH="/tmp/intersight-clean-ec.pem"
+export INTERSIGHT_API_ENDPOINT="https://intersight.com"
+
+ansible-galaxy collection install -r requirements.yml
+```
+
+After that, follow the commands in this README for the workflow you want to run.
+
 ## Prerequisites
 
 - Ansible installed
