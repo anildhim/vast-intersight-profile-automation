@@ -1,0 +1,16 @@
+---
+- name: Build Cisco Intersight standalone policy set and server profile template
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Load local Intersight overrides if present
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../.intersight.local.yml"
+      ignore_errors: true
+  vars_files:
+    - ../group_vars/all.yml
+
+  roles:
+    - role: intersight_organization
+    - role: intersight_policy_catalog
+    - role: intersight_server_profile_templates

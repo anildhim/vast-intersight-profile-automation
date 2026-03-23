@@ -1,0 +1,68 @@
+---
+- name: Validate power policy inputs for {{ power_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - power_policy_item.name | length > 0
+      - power_policy_item.settings is mapping
+      - power_policy_item.settings.power_restore_state | length > 0
+    fail_msg: "Power policy {{ power_policy_item.name }} is missing required settings."
+
+- name: Build power policy payload for {{ power_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_power_policy_payload:
+      Name: "{{ power_policy_item.name }}"
+      Description: "{{ power_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      AllocatedBudget: "{{ power_policy_item.settings.allocated_budget | default(0) }}"
+      DynamicRebalancing: "{{ power_policy_item.settings.dynamic_rebalancing }}"
+      ExtendedPowerCapacity: "{{ power_policy_item.settings.extended_power_capacity }}"
+      PowerPriority: "{{ power_policy_item.settings.power_priority }}"
+      PowerProfiling: "{{ power_policy_item.settings.power_profiling }}"
+      PowerRestoreState: "{{ power_policy_item.settings.power_restore_state }}"
+      PowerSaveMode: "{{ power_policy_item.settings.power_save_mode }}"
+      ProcessorPackagePowerLimit: "{{ power_policy_item.settings.processor_package_power_limit }}"
+      RedundancyMode: "{{ power_policy_item.settings.redundancy_mode }}"
+
+- name: Create temp payload file for {{ power_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_power_payload_file
+
+- name: Write payload for {{ power_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_power_payload_file.path }}"
+    content: "{{ intersight_power_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update power policy {{ power_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /power/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_power_payload_file.path }}"
+      - --name
+      - "{{ power_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_power_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ power_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_power_payload_file.path }}"
+    state: absent
+
+- name: Summarize power policy {{ power_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_power_policy_result

@@ -1,0 +1,82 @@
+---
+- name: Show template plan
+  ansible.builtin.debug:
+    msg:
+      - "Preparing standalone server profile template {{ template_item.name }}"
+      - "Organization: {{ template_item.organization | default(intersight_organization) }}"
+      - "Target platform: {{ template_item.target_platform }}"
+      - "Attached policies: {{ template_item.policies | dict2items | map(attribute='key') | list | sort }}"
+
+- name: Stop before live template changes unless explicitly enabled
+  ansible.builtin.assert:
+    that:
+      - intersight_apply_changes | bool
+    fail_msg: >-
+      Live Intersight changes are disabled. Set intersight_apply_changes: true
+      in .intersight.local.yml only when you want to modify your account.
+
+- name: Validate policy lookup map entries for {{ template_item.name }}
+  ansible.builtin.assert:
+    that:
+      - intersight_policy_lookup_map[item.key] is defined
+    fail_msg: "Missing intersight_policy_lookup_map entry for policy type {{ item.key }}."
+  loop: "{{ template_item.policies | dict2items }}"
+  loop_control:
+    label: "{{ template_item.name }} -> {{ item.key }}"
+
+- name: Use provided organization MOID for {{ template_item.name }}
+  ansible.builtin.set_fact:
+    template_org_moid: "{{ intersight_organization_moid }}"
+  when: intersight_organization_moid | length > 0
+
+- name: Get organization MOID for {{ template_item.name }}
+  cisco.intersight.intersight_rest_api:
+    api_private_key: "{{ intersight_api_private_key_path }}"
+    api_key_id: "{{ intersight_api_key_id }}"
+    api_uri: "{{ intersight_api_endpoint }}/api/v1"
+    validate_certs: "{{ intersight_validate_certs }}"
+    resource_path: "/organization/Organizations"
+    query_params:
+      $filter: "Name eq '{{ template_item.organization | default(intersight_organization) }}'"
+  register: template_org_result
+  when: intersight_organization_moid | length == 0
+
+- name: Capture organization MOID for {{ template_item.name }}
+  ansible.builtin.set_fact:
+    template_org_moid: "{{ template_org_result.api_response.Moid }}"
+  when: intersight_organization_moid | length == 0
+
+- name: Resolve policy references for {{ template_item.name }}
+  ansible.builtin.include_tasks: resolve_policy.yml
+  loop: "{{ template_item.policies | dict2items }}"
+  loop_control:
+    loop_var: policy_item
+    label: "{{ template_item.name }} -> {{ policy_item.key }}"
+
+- name: Create or update {{ template_item.name }}
+  cisco.intersight.intersight_rest_api:
+    api_private_key: "{{ intersight_api_private_key_path }}"
+    api_key_id: "{{ intersight_api_key_id }}"
+    api_uri: "{{ intersight_api_endpoint }}/api/v1"
+    validate_certs: "{{ intersight_validate_certs }}"
+    resource_path: "/server/ProfileTemplates"
+    query_params:
+      $filter: "Name eq '{{ template_item.name }}'"
+    api_body:
+      Name: "{{ template_item.name }}"
+      Description: "{{ template_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ template_org_moid }}"
+      PolicyBucket: "{{ intersight_current_policy_bucket }}"
+      Tags: "{{ template_item.tags | default([]) }}"
+      TargetPlatform: "{{ template_item.target_platform }}"
+    state: "{{ intersight_server_profile_template_state }}"
+  register: intersight_server_profile_template_result
+
+- name: Summarize {{ template_item.name }}
+  ansible.builtin.debug:
+    var: intersight_server_profile_template_result
+
+- name: Reset policy bucket accumulator
+  ansible.builtin.set_fact:
+    intersight_current_policy_bucket: []

@@ -1,0 +1,64 @@
+---
+- name: Validate serial over LAN policy inputs for {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - serial_over_lan_policy_item.name | length > 0
+      - serial_over_lan_policy_item.settings.baud_rate | int > 0
+      - serial_over_lan_policy_item.settings.com_port | length > 0
+      - serial_over_lan_policy_item.settings.ssh_port | int > 0
+    fail_msg: "Serial over LAN policy {{ serial_over_lan_policy_item.name }} is missing required settings."
+
+- name: Build serial over LAN policy payload for {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_serial_over_lan_policy_payload:
+      Name: "{{ serial_over_lan_policy_item.name }}"
+      Description: "{{ serial_over_lan_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      BaudRate: "{{ serial_over_lan_policy_item.settings.baud_rate }}"
+      ComPort: "{{ serial_over_lan_policy_item.settings.com_port }}"
+      Enabled: "{{ serial_over_lan_policy_item.settings.enabled | default(true) }}"
+      SshPort: "{{ serial_over_lan_policy_item.settings.ssh_port }}"
+
+- name: Create temp payload file for {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_serial_over_lan_payload_file
+
+- name: Write payload for {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_serial_over_lan_payload_file.path }}"
+    content: "{{ intersight_serial_over_lan_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update serial over LAN policy {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /sol/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_serial_over_lan_payload_file.path }}"
+      - --name
+      - "{{ serial_over_lan_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_serial_over_lan_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_serial_over_lan_payload_file.path }}"
+    state: absent
+
+- name: Summarize serial over LAN policy {{ serial_over_lan_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_serial_over_lan_policy_result

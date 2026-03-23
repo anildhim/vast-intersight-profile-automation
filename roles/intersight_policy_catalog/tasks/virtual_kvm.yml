@@ -1,0 +1,65 @@
+---
+- name: Validate virtual KVM policy inputs for {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - virtual_kvm_policy_item.name | length > 0
+      - virtual_kvm_policy_item.settings.maximum_sessions | int > 0
+      - virtual_kvm_policy_item.settings.remote_port | int > 0
+    fail_msg: "Virtual KVM policy {{ virtual_kvm_policy_item.name }} is missing required settings."
+
+- name: Build virtual KVM policy payload for {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_virtual_kvm_policy_payload:
+      Name: "{{ virtual_kvm_policy_item.name }}"
+      Description: "{{ virtual_kvm_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      EnableLocalServerVideo: "{{ virtual_kvm_policy_item.settings.enable_local_server_video }}"
+      EnableVideoEncryption: "{{ virtual_kvm_policy_item.settings.enable_video_encryption }}"
+      Enabled: "{{ virtual_kvm_policy_item.settings.enabled }}"
+      MaximumSessions: "{{ virtual_kvm_policy_item.settings.maximum_sessions }}"
+      RemotePort: "{{ virtual_kvm_policy_item.settings.remote_port }}"
+      TunneledKvmEnabled: "{{ virtual_kvm_policy_item.settings.tunneled_kvm_enabled }}"
+
+- name: Create temp payload file for {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_virtual_kvm_payload_file
+
+- name: Write payload for {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_virtual_kvm_payload_file.path }}"
+    content: "{{ intersight_virtual_kvm_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update virtual KVM policy {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /kvm/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_virtual_kvm_payload_file.path }}"
+      - --name
+      - "{{ virtual_kvm_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_virtual_kvm_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_virtual_kvm_payload_file.path }}"
+    state: absent
+
+- name: Summarize virtual KVM policy {{ virtual_kvm_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_virtual_kvm_policy_result

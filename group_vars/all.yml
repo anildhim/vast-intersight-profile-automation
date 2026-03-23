@@ -1,0 +1,166 @@
+---
+# Cisco Intersight API access. Keep secrets outside git and pass them as env vars.
+intersight_api_key_id: "{{ lookup('ansible.builtin.env', 'INTERSIGHT_API_KEY_ID') }}"
+intersight_api_private_key_path: "{{ lookup('ansible.builtin.env', 'INTERSIGHT_API_PRIVATE_KEY_PATH') }}"
+intersight_api_endpoint: "{{ lookup('ansible.builtin.env', 'INTERSIGHT_API_ENDPOINT') | default('https://intersight.com', true) }}"
+intersight_validate_certs: true
+intersight_apply_changes: false
+intersight_organization: "default"
+intersight_organization_description: "Organisation for VAST"
+intersight_create_organization_if_missing: true
+intersight_default_organization_name: "default"
+intersight_include_default_organization: true
+# Advanced override: normally leave empty and use intersight_organization instead.
+intersight_organization_moid: ""
+intersight_target_platform: "Standalone"
+intersight_target_server_model: "Cisco UCS C225 M8"
+intersight_policy_name_prefix: "auto-"
+intersight_template_name_prefix: "auto-"
+intersight_profile_name_prefix: "auto-"
+intersight_local_admin_password: "adminvastdata"
+intersight_number_of_profiles: 1
+
+# Resource lookup map used to resolve policy MOIDs before attaching them to a
+# server profile template. The API object type will be taken from the live API
+# response to reduce hardcoded assumptions.
+intersight_policy_lookup_map:
+  bios:
+    resource_path: "/bios/Policies"
+  boot_order:
+    resource_path: "/boot/PrecisionPolicies"
+  power:
+    resource_path: "/power/Policies"
+  ipmi_over_lan:
+    resource_path: "/ipmioverlan/Policies"
+  local_user:
+    resource_path: "/iam/EndPointUserPolicies"
+  serial_over_lan:
+    resource_path: "/sol/Policies"
+  virtual_kvm:
+    resource_path: "/kvm/Policies"
+  storage:
+    resource_path: "/storage/StoragePolicies"
+
+# This section mirrors the manually built template shown in Intersight.
+# We know the attached policy names from the summary view; the detailed policy
+# settings will be filled in from the next screenshots.
+intersight_server_profile_templates:
+  - name: "{{ intersight_template_name_prefix }}vast-template"
+    description: ""
+    target_platform: "{{ intersight_target_platform }}"
+    organization: "{{ intersight_organization }}"
+    tags: []
+    policies:
+      bios: "{{ intersight_policy_name_prefix }}vast-bios"
+      boot_order: "{{ intersight_policy_name_prefix }}vast-bootorder"
+      power: "{{ intersight_policy_name_prefix }}vast-power"
+      ipmi_over_lan: "{{ intersight_policy_name_prefix }}vast-ipmi"
+      local_user: "{{ intersight_policy_name_prefix }}vast-localuser"
+      serial_over_lan: "{{ intersight_policy_name_prefix }}vast-sol"
+      virtual_kvm: "{{ intersight_policy_name_prefix }}vast-vkvm"
+      storage: "{{ intersight_policy_name_prefix }}vast-storage"
+
+# General-purpose policy catalog. Other users/customers can change names and
+# values here while reusing the same playbook structure.
+intersight_policy_catalog:
+  bios:
+    - name: "{{ intersight_policy_name_prefix }}vast-bios"
+      description: "Standalone rack server BIOS policy for Cisco UCS C225 M8"
+      settings:
+        boot_options:
+          ipv4_http_support: "Disabled"
+          ipv6_http_support: "Disabled"
+          ipv6_pxe_support: "Disabled"
+        pci:
+          sriov_support: "Enabled"
+        processor:
+          local_apic_mode: "X2APIC"
+        server_management:
+          console_redirection: "com-0"
+  boot_order:
+    - name: "{{ intersight_policy_name_prefix }}vast-bootorder"
+      description: "Boot order policy for standalone rack server template"
+      configured_boot_mode: "Uefi"
+      uefi_enable_secure_boot: false
+      boot_devices:
+        - device_name: "local-disk-boot"
+          device_type: "Local Disk"
+          enabled: true
+          controller_slot: "MSTOR-RAID"
+        - device_name: "vmedia"
+          device_type: "Virtual Media"
+          enabled: true
+          virtual_media_subtype: "None"
+  power:
+    - name: "{{ intersight_policy_name_prefix }}vast-power"
+      description: "Power policy for standalone rack server template"
+      settings:
+        allocated_budget: 0
+        dynamic_rebalancing: "Enabled"
+        extended_power_capacity: "Enabled"
+        power_priority: "Low"
+        power_profiling: "Enabled"
+        power_restore_state: "AlwaysOn"
+        power_save_mode: "Enabled"
+        processor_package_power_limit: "Maximum"
+        redundancy_mode: "Grid"
+  ipmi_over_lan:
+    - name: "{{ intersight_policy_name_prefix }}vast-ipmi"
+      description: "IPMI over LAN policy for out-of-band management"
+      settings:
+        enabled: true
+        privilege: "admin"
+  local_user:
+    - name: "{{ intersight_policy_name_prefix }}vast-localuser"
+      description: "Local user policy for standalone rack server template"
+      admin_role_moid: "59684dcb5e468000016525c8"
+      enable_password_expiry: false
+      enforce_strong_password: false
+      password_history: 5
+      always_update_password: true
+      purge: true
+      users:
+        - username: "admin"
+          role: "admin"
+          enable: true
+          password: "{{ intersight_local_admin_password }}"
+  serial_over_lan:
+    - name: "{{ intersight_policy_name_prefix }}vast-sol"
+      description: "Serial over LAN policy for standalone rack server template"
+      settings:
+        baud_rate: 115200
+        com_port: "com0"
+        enabled: true
+        ssh_port: 2400
+  virtual_kvm:
+    - name: "{{ intersight_policy_name_prefix }}vast-vkvm"
+      description: "Virtual KVM policy for standalone rack server template"
+      settings:
+        enable_local_server_video: true
+        enable_video_encryption: true
+        enabled: true
+        maximum_sessions: 4
+        remote_port: 2068
+        tunneled_kvm_enabled: true
+  storage:
+    - name: "{{ intersight_policy_name_prefix }}vast-storage"
+      description: "Storage policy for standalone rack server template"
+      settings:
+        use_jbod_for_virtual_drive_creation: false
+        unused_disks_state: "NoChange"
+        m2_raid_configuration:
+          enabled: true
+          virtual_drive_name: "MStorBootVd"
+          controller_slot: "MSTOR-RAID-1"
+        raid0_drive:
+          enabled: false
+
+# Example server profiles. Replace these with your real policy names and profile inputs.
+intersight_server_profiles:
+  - template_name: "{{ intersight_template_name_prefix }}vast-template"
+    base_name: "{{ intersight_template_name_prefix }}vast-template"
+    start_index: 1
+    auto_start_index: true
+    description: "derive profiles from AUTO"
+    organization: "{{ intersight_organization }}"
+    tags: []

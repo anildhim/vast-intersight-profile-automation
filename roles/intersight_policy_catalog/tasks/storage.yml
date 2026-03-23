@@ -1,0 +1,71 @@
+---
+- name: Validate storage policy inputs for {{ storage_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - storage_policy_item.name | length > 0
+      - storage_policy_item.settings.unused_disks_state | length > 0
+      - storage_policy_item.settings.m2_raid_configuration.controller_slot | length > 0
+    fail_msg: "Storage policy {{ storage_policy_item.name }} is missing required settings."
+
+- name: Build storage policy payload for {{ storage_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_storage_policy_payload:
+      Name: "{{ storage_policy_item.name }}"
+      Description: "{{ storage_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      UseJbodForVdCreation: "{{ storage_policy_item.settings.use_jbod_for_virtual_drive_creation | default(false) }}"
+      UnusedDisksState: "{{ storage_policy_item.settings.unused_disks_state }}"
+      M2VirtualDrive:
+        ClassId: "storage.M2VirtualDriveConfig"
+        ObjectType: "storage.M2VirtualDriveConfig"
+        Enable: "{{ storage_policy_item.settings.m2_raid_configuration.enabled | default(false) }}"
+        Name: "{{ storage_policy_item.settings.m2_raid_configuration.virtual_drive_name }}"
+        ControllerSlot: "{{ storage_policy_item.settings.m2_raid_configuration.controller_slot }}"
+      Raid0Drive:
+        ClassId: "storage.R0Drive"
+        ObjectType: "storage.R0Drive"
+        Enable: "{{ storage_policy_item.settings.raid0_drive.enabled | default(false) }}"
+
+- name: Create temp payload file for {{ storage_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_storage_payload_file
+
+- name: Write payload for {{ storage_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_storage_payload_file.path }}"
+    content: "{{ intersight_storage_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update storage policy {{ storage_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /storage/StoragePolicies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_storage_payload_file.path }}"
+      - --name
+      - "{{ storage_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_storage_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ storage_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_storage_payload_file.path }}"
+    state: absent
+
+- name: Summarize storage policy {{ storage_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_storage_policy_result

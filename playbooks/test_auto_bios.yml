@@ -1,0 +1,23 @@
+---
+- name: Test auto-prefixed BIOS policy only
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Load local Intersight overrides if present
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../.intersight.local.yml"
+      ignore_errors: true
+
+    - name: Keep only BIOS policy catalog for this targeted run
+      ansible.builtin.set_fact:
+        intersight_policy_catalog:
+          bios: "{{ intersight_policy_catalog.bios }}"
+        intersight_policy_types_required:
+          - bios
+        intersight_apply_changes: true
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  roles:
+    - role: intersight_policy_catalog

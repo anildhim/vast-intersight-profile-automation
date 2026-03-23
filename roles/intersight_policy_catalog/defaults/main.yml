@@ -1,0 +1,10 @@
+---
+intersight_policy_types_required:
+  - bios
+  - boot_order
+  - power
+  - ipmi_over_lan
+  - local_user
+  - serial_over_lan
+  - virtual_kvm
+  - storage

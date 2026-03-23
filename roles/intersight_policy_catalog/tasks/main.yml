@@ -1,0 +1,125 @@
+---
+- name: Validate required Intersight API settings for policy build
+  ansible.builtin.assert:
+    that:
+      - intersight_api_key_id | length > 0
+      - intersight_api_private_key_path | length > 0
+      - intersight_api_endpoint | length > 0
+      - intersight_organization | length > 0
+      - intersight_policy_catalog is mapping
+    fail_msg: >-
+      Missing required Intersight configuration for policy creation. Export
+      INTERSIGHT_API_KEY_ID and INTERSIGHT_API_PRIVATE_KEY_PATH, then review
+      group_vars/all.yml.
+
+- name: Validate required policy groups exist in the catalog
+  ansible.builtin.assert:
+    that:
+      - intersight_policy_catalog[item] is defined
+      - intersight_policy_catalog[item] | length > 0
+    fail_msg: "Missing policy catalog definition for {{ item }}."
+  loop: "{{ intersight_policy_types_required }}"
+
+- name: Show policy catalog plan
+  ansible.builtin.debug:
+    msg:
+      - "Organization: {{ intersight_organization }}"
+      - "Target platform: {{ intersight_target_platform }}"
+      - "Target server model: {{ intersight_target_server_model }}"
+      - "Policy type: {{ item.key }}"
+      - "Defined policies: {{ item.value | map(attribute='name') | list }}"
+  loop: "{{ intersight_policy_catalog | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Stop before live changes unless explicitly enabled
+  ansible.builtin.assert:
+    that:
+      - intersight_apply_changes | bool
+    fail_msg: >-
+      Live Intersight changes are disabled. Set intersight_apply_changes: true
+      in .intersight.local.yml only when you want to modify your account.
+
+- name: Use provided organization MOID for policy creation
+  ansible.builtin.set_fact:
+    intersight_policy_catalog_org:
+      api_response:
+        Moid: "{{ intersight_organization_moid }}"
+  when: intersight_organization_moid | length > 0
+
+- name: Get organization MOID for policy creation
+  cisco.intersight.intersight_rest_api:
+    api_private_key: "{{ intersight_api_private_key_path }}"
+    api_key_id: "{{ intersight_api_key_id }}"
+    api_uri: "{{ intersight_api_endpoint }}/api/v1"
+    validate_certs: "{{ intersight_validate_certs }}"
+    resource_path: "/organization/Organizations"
+    query_params:
+      $filter: "Name eq '{{ intersight_organization }}'"
+  register: intersight_policy_catalog_org
+  when: intersight_organization_moid | length == 0
+
+- name: Create or update BIOS policies
+  ansible.builtin.include_tasks: bios.yml
+  loop: "{{ intersight_policy_catalog.bios | default([]) }}"
+  loop_control:
+    loop_var: bios_policy_item
+    label: "{{ bios_policy_item.name }}"
+
+- name: Create or update boot order policies
+  ansible.builtin.include_tasks: boot_order.yml
+  loop: "{{ intersight_policy_catalog.boot_order | default([]) }}"
+  loop_control:
+    loop_var: boot_order_policy_item
+    label: "{{ boot_order_policy_item.name }}"
+
+- name: Create or update power policies
+  ansible.builtin.include_tasks: power.yml
+  loop: "{{ intersight_policy_catalog.power | default([]) }}"
+  loop_control:
+    loop_var: power_policy_item
+    label: "{{ power_policy_item.name }}"
+
+- name: Create or update local user policies
+  ansible.builtin.include_tasks: local_user.yml
+  loop: "{{ intersight_policy_catalog.local_user | default([]) }}"
+  loop_control:
+    loop_var: local_user_policy_item
+    label: "{{ local_user_policy_item.name }}"
+
+- name: Create or update IPMI over LAN policies
+  ansible.builtin.include_tasks: ipmi_over_lan.yml
+  loop: "{{ intersight_policy_catalog.ipmi_over_lan | default([]) }}"
+  loop_control:
+    loop_var: ipmi_over_lan_policy_item
+    label: "{{ ipmi_over_lan_policy_item.name }}"
+
+- name: Create or update serial over LAN policies
+  ansible.builtin.include_tasks: serial_over_lan.yml
+  loop: "{{ intersight_policy_catalog.serial_over_lan | default([]) }}"
+  loop_control:
+    loop_var: serial_over_lan_policy_item
+    label: "{{ serial_over_lan_policy_item.name }}"
+
+- name: Create or update virtual KVM policies
+  ansible.builtin.include_tasks: virtual_kvm.yml
+  loop: "{{ intersight_policy_catalog.virtual_kvm | default([]) }}"
+  loop_control:
+    loop_var: virtual_kvm_policy_item
+    label: "{{ virtual_kvm_policy_item.name }}"
+
+- name: Create or update storage policies
+  ansible.builtin.include_tasks: storage.yml
+  loop: "{{ intersight_policy_catalog.storage | default([]) }}"
+  loop_control:
+    loop_var: storage_policy_item
+    label: "{{ storage_policy_item.name }}"
+
+- name: Placeholder for unsupported policy creation tasks
+  ansible.builtin.debug:
+    msg: >-
+      Create or update the {{ item.key }} policies here after we capture the
+      detailed policy settings from Intersight.
+  loop: "{{ intersight_policy_catalog | dict2items | rejectattr('key', 'in', ['bios', 'boot_order', 'power', 'local_user', 'ipmi_over_lan', 'serial_over_lan', 'virtual_kvm', 'storage']) | list }}"
+  loop_control:
+    label: "{{ item.key }}"

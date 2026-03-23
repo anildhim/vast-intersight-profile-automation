@@ -1,0 +1,60 @@
+---
+- name: Validate IPMI over LAN policy inputs for {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - ipmi_over_lan_policy_item.name | length > 0
+      - ipmi_over_lan_policy_item.settings.privilege | length > 0
+    fail_msg: "IPMI over LAN policy {{ ipmi_over_lan_policy_item.name }} is missing required settings."
+
+- name: Build IPMI over LAN policy payload for {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_ipmi_over_lan_policy_payload:
+      Name: "{{ ipmi_over_lan_policy_item.name }}"
+      Description: "{{ ipmi_over_lan_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      Enabled: "{{ ipmi_over_lan_policy_item.settings.enabled | default(true) }}"
+      Privilege: "{{ ipmi_over_lan_policy_item.settings.privilege }}"
+
+- name: Create temp payload file for {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_ipmi_over_lan_payload_file
+
+- name: Write payload for {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_ipmi_over_lan_payload_file.path }}"
+    content: "{{ intersight_ipmi_over_lan_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update IPMI over LAN policy {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /ipmioverlan/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_ipmi_over_lan_payload_file.path }}"
+      - --name
+      - "{{ ipmi_over_lan_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_ipmi_over_lan_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_ipmi_over_lan_payload_file.path }}"
+    state: absent
+
+- name: Summarize IPMI over LAN policy {{ ipmi_over_lan_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_ipmi_over_lan_policy_result

@@ -1,0 +1,14 @@
+---
+# Copy this file to .intersight.local.yml and fill in your local values.
+# The real .intersight.local.yml is gitignored.
+
+intersight_api_key_id: "replace-with-your-api-key-id"
+intersight_api_private_key_path: "/tmp/intersight-clean-ec.pem"
+intersight_api_endpoint: "https://intersight.com"
+intersight_validate_certs: true
+intersight_apply_changes: false
+intersight_organization_moid: ""
+intersight_policy_name_prefix: "auto-"
+intersight_template_name_prefix: "auto-"
+intersight_profile_name_prefix: "auto-"
+intersight_local_admin_password: "replace-with-local-admin-password"

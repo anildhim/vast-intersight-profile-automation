@@ -1,0 +1,20 @@
+---
+- name: Validate server profile template definitions
+  ansible.builtin.assert:
+    that:
+      - intersight_server_profile_templates | length > 0
+      - item.name is string
+      - item.name | length > 0
+      - item.target_platform | length > 0
+      - item.policies is mapping
+    fail_msg: "Each server profile template must define name, target_platform, and policies."
+  loop: "{{ intersight_server_profile_templates }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Build each server profile template
+  ansible.builtin.include_tasks: template.yml
+  loop: "{{ intersight_server_profile_templates }}"
+  loop_control:
+    loop_var: template_item
+    label: "{{ template_item.name }}"

@@ -1,0 +1,28 @@
+[
+{% for device in boot_order_policy_item.boot_devices %}
+  {% if device.device_type == 'Local Disk' %}
+  {
+    "ClassId": "boot.LocalDisk",
+    "ObjectType": "boot.LocalDisk",
+    "Name": {{ device.device_name | to_json }},
+    "Enabled": {{ (device.enabled | default(true)) | to_json }},
+    "Slot": {{ device.controller_slot | to_json }},
+    "Bootloader": {
+      "ClassId": "boot.Bootloader",
+      "ObjectType": "boot.Bootloader",
+      "Name": "",
+      "Description": "",
+      "Path": ""
+    }
+  }
+  {% elif device.device_type == 'Virtual Media' %}
+  {
+    "ClassId": "boot.VirtualMedia",
+    "ObjectType": "boot.VirtualMedia",
+    "Name": {{ device.device_name | to_json }},
+    "Enabled": {{ (device.enabled | default(true)) | to_json }},
+    "Subtype": {{ device.virtual_media_subtype | default('None') | to_json }}
+  }
+  {% endif %}{% if not loop.last %},{% endif %}
+{% endfor %}
+]

@@ -1,0 +1,64 @@
+---
+- name: Validate BIOS policy inputs for {{ bios_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - bios_policy_item.name | length > 0
+      - bios_policy_item.settings is mapping
+    fail_msg: "BIOS policy {{ bios_policy_item.name }} is missing required settings."
+
+- name: Build BIOS policy payload for {{ bios_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_bios_policy_payload:
+      Name: "{{ bios_policy_item.name }}"
+      Description: "{{ bios_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      Ipv4http: "{{ bios_policy_item.settings.boot_options.ipv4_http_support | lower }}"
+      Ipv6http: "{{ bios_policy_item.settings.boot_options.ipv6_http_support | lower }}"
+      Ipv6pxe: "{{ bios_policy_item.settings.boot_options.ipv6_pxe_support | lower }}"
+      SrIov: "{{ bios_policy_item.settings.pci.sriov_support | lower }}"
+      CbsDbgCpuLapicMode: "{{ bios_policy_item.settings.processor.local_apic_mode }}"
+      ConsoleRedirection: "{{ bios_policy_item.settings.server_management.console_redirection }}"
+
+- name: Create or update BIOS policy {{ bios_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_bios_payload_file
+
+- name: Write payload for {{ bios_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_bios_payload_file.path }}"
+    content: "{{ intersight_bios_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Upsert BIOS policy {{ bios_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /bios/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_bios_payload_file.path }}"
+      - --name
+      - "{{ bios_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_bios_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ bios_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_bios_payload_file.path }}"
+    state: absent
+
+- name: Summarize BIOS policy {{ bios_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_bios_policy_result

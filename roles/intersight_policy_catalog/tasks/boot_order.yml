@@ -1,0 +1,78 @@
+---
+- name: Validate boot order policy inputs for {{ boot_order_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - boot_order_policy_item.name | length > 0
+      - boot_order_policy_item.configured_boot_mode | length > 0
+      - boot_order_policy_item.boot_devices | length > 0
+    fail_msg: "Boot order policy {{ boot_order_policy_item.name }} is missing required settings."
+
+- name: Build boot order policy payload for {{ boot_order_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_boot_order_policy_payload:
+      Name: "{{ boot_order_policy_item.name }}"
+      Description: "{{ boot_order_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      ConfiguredBootMode: "{{ boot_order_policy_item.configured_boot_mode }}"
+      EnforceUefiSecureBoot: "{{ boot_order_policy_item.uefi_enable_secure_boot | default(false) }}"
+      BootDevices: >-
+        {{
+          boot_order_policy_item.boot_devices
+          | map('combine', boot_device_defaults)
+          | list
+        }}
+  vars:
+    boot_device_defaults:
+      device_name: ""
+      device_type: ""
+
+- name: Normalize boot devices for {{ boot_order_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_boot_order_policy_payload:
+      "{{ intersight_boot_order_policy_payload | combine({'BootDevices': intersight_boot_devices_normalized}) }}"
+  vars:
+    intersight_boot_devices_normalized: "{{ lookup('ansible.builtin.template', playbook_dir ~ '/../roles/intersight_policy_catalog/templates/boot_devices.json.j2') | from_json }}"
+
+- name: Create temp payload file for {{ boot_order_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_boot_order_payload_file
+
+- name: Write payload for {{ boot_order_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_boot_order_payload_file.path }}"
+    content: "{{ intersight_boot_order_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Upsert boot order policy {{ boot_order_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /boot/PrecisionPolicies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_boot_order_payload_file.path }}"
+      - --name
+      - "{{ boot_order_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_boot_order_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ boot_order_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_boot_order_payload_file.path }}"
+    state: absent
+
+- name: Summarize boot order policy {{ boot_order_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_boot_order_policy_result
