@@ -12,6 +12,7 @@ The automation is driven from `group_vars/all.yml`.
 ## Repository layout
 
 - `playbooks/test_org.yml`: create or validate an organization only
+- `playbooks/build_policies.yml`: create standalone policies only
 - `playbooks/build_standalone_template.yml`: create policies and template
 - `playbooks/configure_server_profiles.yml`: derive server profiles from a template
 - `roles/intersight_organization/`: organization create and default-org sharing
@@ -50,6 +51,38 @@ You can also use an untracked local vars file:
 2. Put your real credentials there
 3. Run the playbooks normally
 
+## Fast path
+
+If you want a single command that uses the repo defaults, keeps the organization as `default`, and lets you choose how many profiles to derive, use this flow:
+
+```bash
+cd "$REPO_HOME"
+export INTERSIGHT_API_ENDPOINT="https://intersight.com"
+
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml   -e intersight_apply_changes=true   -e intersight_organization=default   -e intersight_create_organization_if_missing=false   -e intersight_include_default_organization=false   -e intersight_policy_name_prefix="auto-"   -e intersight_template_name_prefix="auto-"   -e intersight_profile_name_prefix="auto-"
+
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/configure_server_profiles.yml   -e intersight_apply_changes=true   -e intersight_organization=default   -e intersight_number_of_profiles=3   -e intersight_policy_name_prefix="auto-"   -e intersight_template_name_prefix="auto-"   -e intersight_profile_name_prefix="auto-"
+```
+
+Change these CLI values as needed:
+
+- `intersight_number_of_profiles`
+- `intersight_policy_name_prefix`
+- `intersight_template_name_prefix`
+- `intersight_profile_name_prefix`
+
+Everything else will use the defaults from `group_vars/all.yml`.
+
+## Recommended workflow for Advanced Users
+
+1. Configure credentials and endpoint
+2. Set organization inputs
+3. Build policies and template with `playbooks/build_standalone_template.yml`
+4. Verify the template in Intersight
+5. Set profile inputs
+6. Derive server profiles with `playbooks/configure_server_profiles.yml`
+
+
 ## Main inputs
 
 Common inputs in `group_vars/all.yml`:
@@ -70,37 +103,6 @@ Common inputs in `group_vars/all.yml`:
 
 Use `intersight_organization` as the normal user input. `intersight_organization_moid` is an advanced override for cases where you want to target a specific organization object directly and skip name-based lookup. Most users should leave it empty.
 
-## Quick test
-
-Use this path first when you want to validate the repository with the default organization before changing any inputs.
-
-1. Build the policies and template in `default`
-2. Derive one profile from the template
-
-```bash
-cd "$REPO_HOME"
-export INTERSIGHT_API_ENDPOINT="https://intersight.com"
-
-ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml \
-  -e intersight_apply_changes=true \
-  -e intersight_organization=default \
-  -e intersight_create_organization_if_missing=false \
-  -e intersight_include_default_organization=false
-
-ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/configure_server_profiles.yml \
-  -e intersight_apply_changes=true \
-  -e intersight_organization=default \
-  -e intersight_number_of_profiles=1
-```
-
-Expected result:
-
-- policies created in `default`
-- `auto-vast-template` created in `default`
-- one derived profile created from that template
-
-After that, users can change the variables in `group_vars/all.yml` or pass overrides on the command line.
-
 ## 1. Organizations
 
 The organization role does the following:
@@ -116,6 +118,12 @@ The share toggle is:
 
 That creates the Intersight sharing rule so the target org can consume shared resources from `default`.
 
+Set the organization name in `group_vars/all.yml` with:
+
+```yaml
+intersight_organization: "your-org-name"
+```
+
 Test only the organization flow:
 
 ```bash
@@ -126,6 +134,20 @@ ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/test
   -e intersight_create_organization_if_missing=true \
   -e intersight_include_default_organization=true
 ```
+
+Actual organization-backed build command for normal use:
+
+```bash
+cd "$REPO_HOME"
+export INTERSIGHT_API_ENDPOINT="https://intersight.com"
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=create-new-org \
+  -e intersight_create_organization_if_missing=true \
+  -e intersight_include_default_organization=true
+```
+
+This is the normal user flow when the target organization may need to be created and shared before policies and template are built.
 
 ## 2. Policies
 
@@ -153,17 +175,19 @@ Policy names are driven by `intersight_policy_name_prefix`. By default they are 
 
 These policy definitions live in `group_vars/all.yml` under `intersight_policy_catalog`.
 
-Build policies together with the template:
+Build the full policy set with:
 
 ```bash
 cd "$REPO_HOME"
 export INTERSIGHT_API_ENDPOINT="https://intersight.com"
-ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml \
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_policies.yml \
   -e intersight_apply_changes=true \
   -e intersight_organization=default \
   -e intersight_create_organization_if_missing=false \
   -e intersight_include_default_organization=false
 ```
+
+This creates all policies defined under `intersight_policy_catalog` without creating the template.
 
 You can also run the targeted policy test playbooks individually:
 
@@ -183,6 +207,14 @@ The server profile template role:
 - resolves the policy MOIDs in the target org
 - attaches the policy bucket to the template
 - creates or updates the standalone template
+
+`playbooks/build_standalone_template.yml` runs the full baseline flow for this stage:
+
+- organization handling
+- policy creation or update
+- template creation or update
+
+So it does not assume the policies already exist. It creates or updates them first, then builds the template.
 
 The current template input is in `group_vars/all.yml` under `intersight_server_profile_templates`.
 
@@ -269,14 +301,51 @@ With the example above, the created profile names will look like:
 
 depending on `intersight_number_of_profiles` and the start-index settings.
 
-## Recommended workflow
+Edit these in `group_vars/all.yml`:
 
-1. Configure credentials and endpoint
-2. Set organization inputs
-3. Build policies and template with `playbooks/build_standalone_template.yml`
-4. Verify the template in Intersight
-5. Set profile inputs
-6. Derive server profiles with `playbooks/configure_server_profiles.yml`
+- `intersight_number_of_profiles: 1`
+- `start_index: 1`
+- `auto_start_index: true`
+
+Defaults:
+
+- `intersight_number_of_profiles` default is `1`
+- `start_index` default is `1`
+- `auto_start_index` default is `true`
+
+So by default the profile flow creates one derived profile starting at suffix `1` unless you change those inputs.
+
+## Quick test
+
+Use this path first when you want to validate the repository with the default organization before changing any inputs.
+
+1. Build the policies and template in `default`
+2. Derive one profile from the template
+
+```bash
+cd "$REPO_HOME"
+export INTERSIGHT_API_ENDPOINT="https://intersight.com"
+
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=default \
+  -e intersight_create_organization_if_missing=false \
+  -e intersight_include_default_organization=false
+
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/configure_server_profiles.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=default \
+  -e intersight_number_of_profiles=1
+```
+
+Expected result:
+
+- policies created in `default`
+- `auto-vast-template` created in `default`
+- one derived profile created from that template
+
+After that, users can change the variables in `group_vars/all.yml` or pass overrides on the command line.
+
 
 ## Notes
 
