@@ -8,6 +8,7 @@
         file: "{{ playbook_dir }}/../.intersight.local.yml"
       ignore_errors: true
 
+
     - name: Keep only power policy catalog for this targeted run
       ansible.builtin.set_fact:
         intersight_policy_catalog:

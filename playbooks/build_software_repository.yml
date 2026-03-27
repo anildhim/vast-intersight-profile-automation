@@ -1,5 +1,5 @@
 ---
-- name: Test Cisco Intersight organization creation
+- name: Build Cisco Intersight software repository operating system files
   hosts: localhost
   gather_facts: false
   pre_tasks:
@@ -8,11 +8,9 @@
         file: "{{ playbook_dir }}/../.intersight.local.yml"
       ignore_errors: true
 
-    - name: Force live changes for targeted organization test
-      ansible.builtin.set_fact:
-        intersight_apply_changes: true
   vars_files:
     - ../group_vars/all.yml
 
   roles:
     - role: intersight_organization
+    - role: intersight_software_repository

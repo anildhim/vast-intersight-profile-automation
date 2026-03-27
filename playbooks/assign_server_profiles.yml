@@ -1,5 +1,5 @@
 ---
-- name: Test Cisco Intersight organization creation
+- name: Assign servers to Cisco Intersight server profiles
   hosts: localhost
   gather_facts: false
   pre_tasks:
@@ -8,11 +8,14 @@
         file: "{{ playbook_dir }}/../.intersight.local.yml"
       ignore_errors: true
 
-    - name: Force live changes for targeted organization test
+
+    - name: Force assign-only mode
       ansible.builtin.set_fact:
-        intersight_apply_changes: true
+        intersight_server_profiles: []
   vars_files:
     - ../group_vars/all.yml
 
+
   roles:
     - role: intersight_organization
+    - role: intersight_server_profiles

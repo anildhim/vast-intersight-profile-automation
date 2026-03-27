@@ -1,0 +1,210 @@
+---
+- name: Reset deploy kickoff tracking for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_server_profile_deploy_kickoff_record:
+      profile_name: "{{ server_profile_deploy_item }}"
+      status: "Pending"
+      server_serial_number: ""
+      success: false
+      error: ""
+      error_description: ""
+      should_monitor: false
+
+- name: Kick off deploy flow for {{ server_profile_deploy_item }}
+  block:
+    - name: Resolve target organization MOID for {{ server_profile_deploy_item }}
+      cisco.intersight.intersight_rest_api:
+        api_private_key: "{{ intersight_api_private_key_path }}"
+        api_key_id: "{{ intersight_api_key_id }}"
+        api_uri: "{{ intersight_api_endpoint }}/api/v1"
+        validate_certs: "{{ intersight_validate_certs }}"
+        resource_path: "/organization/Organizations"
+        query_params:
+          $filter: "Name eq '{{ intersight_organization }}'"
+      register: intersight_server_profile_deploy_org_lookup
+
+    - name: Resolve current profile {{ server_profile_deploy_item }}
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+          - --api-uri
+          - "{{ intersight_api_endpoint }}/api/v1"
+          - --resource-path
+          - /server/Profiles
+          - --api-key-id
+          - "{{ intersight_api_key_id }}"
+          - --api-private-key
+          - "{{ intersight_api_private_key_path }}"
+          - --name
+          - "{{ server_profile_deploy_item }}"
+          - --organization-moid
+          - "{{ intersight_server_profile_deploy_org_lookup.api_response.Moid }}"
+      register: intersight_server_profile_current_lookup
+      changed_when: false
+
+    - name: Mark deploy status for {{ server_profile_deploy_item }}
+      ansible.builtin.set_fact:
+        intersight_server_profile_current: "{{ intersight_server_profile_current_lookup.stdout | from_json }}"
+        intersight_server_profile_deploy_already_in_progress: >-
+          {{
+            ((intersight_server_profile_current_lookup.stdout | from_json).DeployStatus | default('')) == 'Complete'
+            or ((intersight_server_profile_current_lookup.stdout | from_json).ConfigContext.ControlAction | default('')) == 'Deploy'
+            or ((intersight_server_profile_current_lookup.stdout | from_json).ConfigContext.ConfigState | default('')) in ['Validating', 'Configuring']
+            or (((intersight_server_profile_current_lookup.stdout | from_json).ScheduledActions | default([])) | selectattr('Action', 'equalto', 'Activate') | list | length) > 0
+          }}
+
+    - name: Skip deploy when already in progress for {{ server_profile_deploy_item }}
+      ansible.builtin.debug:
+        msg: >-
+          Profile {{ server_profile_deploy_item }} is already deployed or currently in deploy/configuring state.
+          Skipping duplicate activation request.
+      when: intersight_server_profile_deploy_already_in_progress | bool
+
+    - name: Build deploy payload for {{ server_profile_deploy_item }}
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../payloads/server-profile-deploy-{{ server_profile_deploy_item }}.json"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'ScheduledActions': [
+                {
+                  'ClassId': 'policy.ScheduledAction',
+                  'ObjectType': 'policy.ScheduledAction',
+                  'Action': 'Deploy',
+                  'ActionQualifier': {
+                    'ClassId': 'policy.ActionQualifier',
+                    'ObjectType': 'policy.ActionQualifier',
+                    'Scope': 'all'
+                  },
+                  'ProceedOnReboot': False
+                },
+                {
+                  'ClassId': 'policy.ScheduledAction',
+                  'ObjectType': 'policy.ScheduledAction',
+                  'Action': 'Activate',
+                  'ActionQualifier': {
+                    'ClassId': 'policy.ActionQualifier',
+                    'ObjectType': 'policy.ActionQualifier',
+                    'Scope': 'all'
+                  },
+                  'ProceedOnReboot': (intersight_server_profile_proceed_on_reboot | bool)
+                }
+              ]
+            } | to_nice_json
+          }}
+      when: not (intersight_server_profile_deploy_already_in_progress | bool)
+
+    - name: Deploy profile {{ server_profile_deploy_item }}
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+          - --api-uri
+          - "{{ intersight_api_endpoint }}/api/v1"
+          - --resource-path
+          - /server/Profiles
+          - --api-key-id
+          - "{{ intersight_api_key_id }}"
+          - --api-private-key
+          - "{{ intersight_api_private_key_path }}"
+          - --payload-file
+          - "{{ playbook_dir }}/../payloads/server-profile-deploy-{{ server_profile_deploy_item }}.json"
+          - --name
+          - "{{ server_profile_deploy_item }}"
+          - --organization-moid
+          - "{{ intersight_server_profile_deploy_org_lookup.api_response.Moid }}"
+      register: intersight_server_profile_deploy_result
+      changed_when: >-
+        intersight_server_profile_deploy_result.stdout | default('') | length > 0 and
+        ((intersight_server_profile_deploy_result.stdout | from_json).changed | default(false))
+      when: not (intersight_server_profile_deploy_already_in_progress | bool)
+
+    - name: Summarize deploy for {{ server_profile_deploy_item }}
+      ansible.builtin.debug:
+        var: intersight_server_profile_deploy_result
+      when: intersight_server_profile_deploy_result is defined
+
+    - name: Mark deploy kickoff success for {{ server_profile_deploy_item }}
+      ansible.builtin.set_fact:
+        intersight_server_profile_deploy_kickoff_record:
+          profile_name: "{{ server_profile_deploy_item }}"
+          status: "{{ 'InProgress' if (intersight_server_profile_deploy_already_in_progress | bool) else 'Submitted' }}"
+          server_serial_number: ""
+          success: true
+          error: ""
+          error_description: ""
+          should_monitor: true
+  rescue:
+    - name: Mark deploy kickoff failure for {{ server_profile_deploy_item }}
+      ansible.builtin.set_fact:
+        intersight_server_profile_deploy_kickoff_record:
+          profile_name: "{{ server_profile_deploy_item }}"
+          status: "KickoffFailed"
+          server_serial_number: ""
+          success: false
+          error: >-
+            {{
+              ansible_failed_result.stderr
+              | default(
+                  ansible_failed_result.stdout
+                  | default(
+                      ansible_failed_result.msg
+                      | default('Deploy kickoff failed')
+                  )
+              )
+            }}
+          error_description: >-
+            {{
+              ansible_failed_result.stderr
+              | default(
+                  ansible_failed_result.stdout
+                  | default(
+                      ansible_failed_result.msg
+                      | default('Deploy kickoff failed')
+                  )
+              )
+            }}
+          should_monitor: false
+
+- name: Track kickoff failure immediately for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_deployed_server_profiles: >-
+      {{
+        (intersight_deployed_server_profiles | default([]))
+        + [
+            {
+              'profile_name': intersight_server_profile_deploy_kickoff_record.profile_name,
+              'status': intersight_server_profile_deploy_kickoff_record.status,
+              'server_serial_number': intersight_server_profile_deploy_kickoff_record.server_serial_number,
+              'success': intersight_server_profile_deploy_kickoff_record.success,
+              'error': intersight_server_profile_deploy_kickoff_record.error,
+              'error_description': intersight_server_profile_deploy_kickoff_record.error_description
+            }
+          ]
+      }}
+  when: not (intersight_server_profile_deploy_kickoff_record.should_monitor | bool)
+
+- name: Persist deploy artifact after kickoff failure for {{ server_profile_deploy_item }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_effective_server_profile_deploy_artifact_path }}"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          'organization': intersight_organization,
+          'profiles': intersight_deployed_server_profiles | default([]),
+          'count': intersight_deployed_server_profiles | default([]) | length
+        } | to_nice_json
+      }}
+  when: not (intersight_server_profile_deploy_kickoff_record.should_monitor | bool)
+
+- name: Add deploy profile to monitor queue for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_profiles_pending_monitor: >-
+      {{
+        (intersight_profiles_pending_monitor | default([]))
+        + [server_profile_deploy_item]
+      }}
+  when: intersight_server_profile_deploy_kickoff_record.should_monitor | bool

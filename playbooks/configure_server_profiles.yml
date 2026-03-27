@@ -7,6 +7,13 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../.intersight.local.yml"
       ignore_errors: true
+
+
+    - name: Force derive-only mode
+      ansible.builtin.set_fact:
+        intersight_server_profile_assign_enabled: false
+        intersight_server_profile_assignments: []
+        intersight_server_profile_deployments: []
   vars_files:
     - ../group_vars/all.yml
 

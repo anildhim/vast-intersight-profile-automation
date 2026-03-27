@@ -1,0 +1,141 @@
+---
+- name: Reset deploy tracking for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_server_profile_deploy_status_parsed:
+      profile_name: "{{ server_profile_deploy_item }}"
+      status: "Pending"
+      server_serial_number: ""
+      success: false
+      error: ""
+      error_description: ""
+
+- name: Resolve target organization MOID for monitor {{ server_profile_deploy_item }}
+  cisco.intersight.intersight_rest_api:
+    api_private_key: "{{ intersight_api_private_key_path }}"
+    api_key_id: "{{ intersight_api_key_id }}"
+    api_uri: "{{ intersight_api_endpoint }}/api/v1"
+    validate_certs: "{{ intersight_validate_certs }}"
+    resource_path: "/organization/Organizations"
+    query_params:
+      $filter: "Name eq '{{ intersight_organization }}'"
+  register: intersight_server_profile_deploy_org_lookup
+
+- name: Wait for deploy completion for {{ server_profile_deploy_item }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_get_server_profile_deploy_status.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --profile-name
+      - "{{ server_profile_deploy_item }}"
+      - --organization-moid
+      - "{{ intersight_server_profile_deploy_org_lookup.api_response.Moid }}"
+  register: intersight_server_profile_deploy_status_wait_result
+  changed_when: false
+  until: >-
+    (intersight_server_profile_deploy_status_wait_result.stdout | from_json).terminal | bool
+  retries: >-
+    {{
+      (
+        (intersight_effective_server_profile_deploy_wait_timeout_seconds | int)
+        // (intersight_effective_server_profile_deploy_wait_poll_seconds | int)
+      ) | int
+      if
+      (
+        (intersight_effective_server_profile_deploy_wait_timeout_seconds | int)
+        // (intersight_effective_server_profile_deploy_wait_poll_seconds | int)
+      ) | int > 0
+      else 1
+    }}
+  delay: "{{ intersight_effective_server_profile_deploy_wait_poll_seconds | int }}"
+  when: intersight_effective_server_profile_deploy_wait | bool
+
+- name: Fetch current deploy status without waiting for {{ server_profile_deploy_item }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_get_server_profile_deploy_status.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --profile-name
+      - "{{ server_profile_deploy_item }}"
+      - --organization-moid
+      - "{{ intersight_server_profile_deploy_org_lookup.api_response.Moid }}"
+  register: intersight_server_profile_deploy_status_nowait_result
+  changed_when: false
+  when: not (intersight_effective_server_profile_deploy_wait | bool)
+
+- name: Normalize deploy status for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_server_profile_deploy_status_parsed: >-
+      {{
+        (
+          intersight_server_profile_deploy_status_wait_result.get('stdout', '{}')
+          if (intersight_effective_server_profile_deploy_wait | bool)
+          else intersight_server_profile_deploy_status_nowait_result.get('stdout', '{}')
+        ) | from_json
+      }}
+
+- name: Mark deploy failure details for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_server_profile_deploy_status_parsed: >-
+      {{
+        intersight_server_profile_deploy_status_parsed
+        | combine({
+            'error': (
+              ''
+              if (intersight_server_profile_deploy_status_parsed.get('success', false) | bool)
+              else ('Final status: ' ~ intersight_server_profile_deploy_status_parsed.get('status', 'Unknown'))
+            ),
+            'error_description': (
+              ''
+              if (intersight_server_profile_deploy_status_parsed.get('success', false) | bool)
+              else ('Final status: ' ~ intersight_server_profile_deploy_status_parsed.get('status', 'Unknown'))
+            )
+          })
+      }}
+
+- name: Track deployed profile status for {{ server_profile_deploy_item }}
+  ansible.builtin.set_fact:
+    intersight_deployed_server_profiles: >-
+      {{
+        (intersight_deployed_server_profiles | default([]))
+        + [
+            {
+              'profile_name': intersight_server_profile_deploy_status_parsed.get('profile_name', server_profile_deploy_item),
+              'status': intersight_server_profile_deploy_status_parsed.get('status', 'Unknown'),
+              'server_serial_number': intersight_server_profile_deploy_status_parsed.get('server_serial_number', ''),
+              'success': intersight_server_profile_deploy_status_parsed.get('success', false),
+              'error': intersight_server_profile_deploy_status_parsed.get('error', ''),
+              'error_description': intersight_server_profile_deploy_status_parsed.get('error_description', '')
+            }
+          ]
+      }}
+
+- name: Ensure deploy artifact directory exists
+  ansible.builtin.file:
+    path: "{{ intersight_effective_server_profile_deploy_artifact_path | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Persist deploy artifact
+  ansible.builtin.copy:
+    dest: "{{ intersight_effective_server_profile_deploy_artifact_path }}"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          'organization': intersight_organization,
+          'profiles': intersight_deployed_server_profiles | default([]),
+          'count': intersight_deployed_server_profiles | default([]) | length
+        } | to_nice_json
+      }}

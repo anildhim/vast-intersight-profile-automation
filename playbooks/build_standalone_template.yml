@@ -7,6 +7,7 @@
       ansible.builtin.include_vars:
         file: "{{ playbook_dir }}/../.intersight.local.yml"
       ignore_errors: true
+
   vars_files:
     - ../group_vars/all.yml
 

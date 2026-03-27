@@ -17,8 +17,41 @@ intersight_target_server_model: "Cisco UCS C225 M8"
 intersight_policy_name_prefix: "auto-"
 intersight_template_name_prefix: "auto-"
 intersight_profile_name_prefix: "auto-"
+intersight_software_repository_name_prefix: "auto-"
+intersight_software_repository_catalog_name: "user-catalog"
+intersight_software_repository_catalog_moid: ""
 intersight_local_admin_password: "adminvastdata"
-intersight_number_of_profiles: 1
+intersight_server_serial_numbers:
+  - "WZP2949ACF2"
+  - "WZP2949ACF1"
+  - "WZP2949ACDC"
+  - "WZP2949ACDB"
+  - "WZP2949ACF9"
+intersight_server_profile_assignments: []
+intersight_server_profile_deployments: []
+intersight_server_profile_deploy_profile_names: []
+intersight_server_profile_proceed_on_reboot: true
+intersight_server_profile_artifact_path: "{{ playbook_dir | default('.') }}/../artifacts/derived_server_profiles.json"
+
+intersight_software_repository_file_location: "https://10.108.1.8/vast-os-12.15.25-2267132.iso"
+intersight_software_repository_operating_system_files:
+  - name: "{{ intersight_software_repository_name_prefix }}vast-os-image"
+    description: "Operating system image staged in the Intersight software repository"
+    organization: "{{ intersight_organization }}"
+    catalog_name: "{{ intersight_software_repository_catalog_name }}"
+    catalog_moid: "{{ intersight_software_repository_catalog_moid }}"
+    import_action: "None"
+    vendor: "Rocky Linux"
+    version: "Rocky Linux 8.6"
+    release_date: ""
+    file_location: "{{ intersight_software_repository_file_location }}"
+    source_username: ""
+    source_password: ""
+    tags: []
+    # Optional advanced override. When set, this source mapping is passed
+    # directly to Intersight instead of building one from file_location.
+    source: {}
+    extra_properties: {}
 
 # Resource lookup map used to resolve policy MOIDs before attaching them to a
 # server profile template. The API object type will be taken from the live API
@@ -116,7 +149,7 @@ intersight_policy_catalog:
       admin_role_moid: "59684dcb5e468000016525c8"
       enable_password_expiry: false
       enforce_strong_password: false
-      password_history: 5
+      password_history: 0
       always_update_password: true
       purge: true
       users:
@@ -163,4 +196,5 @@ intersight_server_profiles:
     auto_start_index: true
     description: "derive profiles from AUTO"
     organization: "{{ intersight_organization }}"
+    serial_numbers: "{{ intersight_server_serial_numbers }}"
     tags: []

@@ -1,0 +1,142 @@
+---
+- name: Reset assignment tracking for {{ server_profile_assignment_item.profile_name }}
+  ansible.builtin.set_fact:
+    intersight_server_profile_assignment_record:
+      profile_name: "{{ server_profile_assignment_item.profile_name }}"
+      server_serial_number: "{{ server_profile_assignment_item.server_serial_number }}"
+      status: "Pending"
+      success: false
+      error: ""
+      error_description: ""
+
+- name: Assign profile flow for {{ server_profile_assignment_item.profile_name }}
+  block:
+    - name: Resolve target organization MOID for {{ server_profile_assignment_item.profile_name }}
+      cisco.intersight.intersight_rest_api:
+        api_private_key: "{{ intersight_api_private_key_path }}"
+        api_key_id: "{{ intersight_api_key_id }}"
+        api_uri: "{{ intersight_api_endpoint }}/api/v1"
+        validate_certs: "{{ intersight_validate_certs }}"
+        resource_path: "/organization/Organizations"
+        query_params:
+          $filter: "Name eq '{{ intersight_organization }}'"
+      register: intersight_server_assignment_org_lookup
+
+    - name: Resolve profile {{ server_profile_assignment_item.profile_name }}
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+          - --api-uri
+          - "{{ intersight_api_endpoint }}/api/v1"
+          - --resource-path
+          - /server/Profiles
+          - --api-key-id
+          - "{{ intersight_api_key_id }}"
+          - --api-private-key
+          - "{{ intersight_api_private_key_path }}"
+          - --name
+          - "{{ server_profile_assignment_item.profile_name }}"
+          - --organization-moid
+          - "{{ intersight_server_assignment_org_lookup.api_response.Moid }}"
+      register: intersight_server_profile_assignment_profile_lookup
+      changed_when: false
+
+    - name: Resolve server by serial number {{ server_profile_assignment_item.server_serial_number }}
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/intersight_lookup_server_by_serial.py"
+          - --api-uri
+          - "{{ intersight_api_endpoint }}/api/v1"
+          - --api-key-id
+          - "{{ intersight_api_key_id }}"
+          - --api-private-key
+          - "{{ intersight_api_private_key_path }}"
+          - --serial-number
+          - "{{ server_profile_assignment_item.server_serial_number }}"
+      register: intersight_server_profile_assignment_server_lookup
+      changed_when: false
+
+    - name: Assign server {{ server_profile_assignment_item.server_serial_number }} to profile {{ server_profile_assignment_item.profile_name }}
+      cisco.intersight.intersight_server_profile:
+        api_private_key: "{{ intersight_api_private_key_path }}"
+        api_key_id: "{{ intersight_api_key_id }}"
+        api_uri: "{{ intersight_api_endpoint }}/api/v1"
+        validate_certs: "{{ intersight_validate_certs }}"
+        name: "{{ server_profile_assignment_item.profile_name }}"
+        organization: "{{ intersight_organization }}"
+        assigned_server: "{{ (intersight_server_profile_assignment_server_lookup.stdout | from_json).Moid }}"
+        state: present
+      register: intersight_server_profile_assignment_result
+
+    - name: Summarize assignment for {{ server_profile_assignment_item.profile_name }}
+      ansible.builtin.debug:
+        var: intersight_server_profile_assignment_result
+
+    - name: Mark assignment success for {{ server_profile_assignment_item.profile_name }}
+      ansible.builtin.set_fact:
+        intersight_server_profile_assignment_record:
+          profile_name: "{{ server_profile_assignment_item.profile_name }}"
+          server_serial_number: "{{ server_profile_assignment_item.server_serial_number }}"
+          status: "Assigned"
+          success: true
+          error: ""
+          error_description: ""
+  rescue:
+    - name: Mark assignment failure for {{ server_profile_assignment_item.profile_name }}
+      ansible.builtin.set_fact:
+        intersight_server_profile_assignment_record:
+          profile_name: "{{ server_profile_assignment_item.profile_name }}"
+          server_serial_number: "{{ server_profile_assignment_item.server_serial_number }}"
+          status: "Failed"
+          success: false
+          error: >-
+            {{
+              ansible_failed_result.stderr
+              | default(
+                  ansible_failed_result.stdout
+                  | default(
+                      ansible_failed_result.msg
+                      | default('Assignment failed')
+                  )
+              )
+            }}
+          error_description: >-
+            {{
+              ansible_failed_result.stderr
+              | default(
+                  ansible_failed_result.stdout
+                  | default(
+                      ansible_failed_result.msg
+                      | default('Assignment failed')
+                  )
+              )
+            }}
+
+- name: Track assignment result for {{ server_profile_assignment_item.profile_name }}
+  ansible.builtin.set_fact:
+    intersight_assigned_server_profiles: >-
+      {{
+        (intersight_assigned_server_profiles | default([]))
+        + [intersight_server_profile_assignment_record]
+      }}
+
+- name: Ensure assignment artifact directory exists
+  ansible.builtin.file:
+    path: "{{ intersight_server_profile_assign_artifact_path | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Persist assignment artifact
+  ansible.builtin.copy:
+    dest: "{{ intersight_server_profile_assign_artifact_path }}"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          'organization': intersight_organization,
+          'profiles': intersight_assigned_server_profiles | default([]),
+          'count': intersight_assigned_server_profiles | default([]) | length
+        } | to_nice_json
+      }}

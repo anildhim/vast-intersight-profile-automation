@@ -1,0 +1,38 @@
+---
+- name: Validate required Intersight API settings for software repository build
+  ansible.builtin.assert:
+    that:
+      - intersight_api_key_id | length > 0
+      - intersight_api_private_key_path | length > 0
+      - intersight_api_endpoint | length > 0
+      - intersight_software_repository_operating_system_files is sequence
+      - intersight_software_repository_operating_system_files | length > 0
+    fail_msg: >-
+      Missing required Intersight configuration for software repository
+      creation. Export INTERSIGHT_API_KEY_ID and
+      INTERSIGHT_API_PRIVATE_KEY_PATH, then review group_vars/all.yml.
+
+- name: Show software repository plan
+  ansible.builtin.debug:
+    msg:
+      - "Organization: {{ item.organization | default(intersight_organization) }}"
+      - "Operating system file: {{ item.name }}"
+      - "Import action: {{ item.import_action | default('None') }}"
+  loop: "{{ intersight_software_repository_operating_system_files }}"
+  loop_control:
+    label: "{{ item.name }}"
+
+- name: Stop before live changes unless explicitly enabled
+  ansible.builtin.assert:
+    that:
+      - intersight_apply_changes | bool
+    fail_msg: >-
+      Live Intersight changes are disabled. Set intersight_apply_changes: true
+      in .intersight.local.yml only when you want to modify your account.
+
+- name: Create or update operating system files
+  ansible.builtin.include_tasks: operating_system_file.yml
+  loop: "{{ intersight_software_repository_operating_system_files }}"
+  loop_control:
+    loop_var: operating_system_file_item
+    label: "{{ operating_system_file_item.name }}"

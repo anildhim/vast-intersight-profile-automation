@@ -8,6 +8,7 @@
         file: "{{ playbook_dir }}/../.intersight.local.yml"
       ignore_errors: true
 
+
     - name: Keep only serial over LAN policy catalog for this targeted run
       ansible.builtin.set_fact:
         intersight_policy_catalog:

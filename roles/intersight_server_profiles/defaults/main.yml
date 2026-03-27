@@ -1,2 +1,14 @@
 ---
 intersight_validate_certs: true
+intersight_server_serial_numbers: []
+intersight_server_profile_assignments: []
+intersight_server_profile_deployments: []
+intersight_server_profile_deploy_profile_names: []
+intersight_server_profile_proceed_on_reboot: true
+intersight_server_profile_assign_enabled: true
+intersight_server_profile_assign_artifact_path: "{{ playbook_dir | default('.') }}/../artifacts/assigned_server_profiles.json"
+intersight_server_profile_deploy_wait: true
+intersight_server_profile_deploy_wait_initial_delay_seconds: 300
+intersight_server_profile_deploy_wait_poll_seconds: 60
+intersight_server_profile_deploy_wait_timeout_seconds: 1800
+intersight_server_profile_deploy_artifact_path: "{{ playbook_dir | default('.') }}/../artifacts/deployed_server_profiles.json"

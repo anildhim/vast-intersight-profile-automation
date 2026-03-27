@@ -1,0 +1,189 @@
+---
+- name: Validate operating system file inputs for {{ operating_system_file_item.name }}
+  ansible.builtin.assert:
+    that:
+      - operating_system_file_item.name | length > 0
+      - (operating_system_file_item.source | default({})) is mapping
+      - >-
+        (
+          (operating_system_file_item.source | default({})) | length > 0
+        )
+        or
+        (
+          operating_system_file_item.file_location | default('') | length > 0
+        )
+    fail_msg: >-
+      Operating system file {{ operating_system_file_item.name }} must define a
+      name and either a source mapping or file_location.
+
+- name: Use provided organization MOID for {{ operating_system_file_item.name }}
+  ansible.builtin.set_fact:
+    intersight_operating_system_file_org:
+      api_response:
+        Moid: "{{ intersight_organization_moid }}"
+  when: intersight_organization_moid | length > 0
+
+- name: Resolve organization MOID for {{ operating_system_file_item.name }}
+  cisco.intersight.intersight_rest_api:
+    api_private_key: "{{ intersight_api_private_key_path }}"
+    api_key_id: "{{ intersight_api_key_id }}"
+    api_uri: "{{ intersight_api_endpoint }}/api/v1"
+    validate_certs: "{{ intersight_validate_certs }}"
+    resource_path: "/organization/Organizations"
+    query_params:
+      $filter: "Name eq '{{ operating_system_file_item.organization | default(intersight_organization) }}'"
+  register: intersight_operating_system_file_org
+  when: intersight_organization_moid | length == 0
+
+- name: Use provided catalog MOID for {{ operating_system_file_item.name }}
+  ansible.builtin.set_fact:
+    intersight_operating_system_file_catalog_moid_resolved: >-
+      {{ operating_system_file_item.catalog_moid | default(intersight_software_repository_catalog_moid | default('')) }}
+  when: >-
+    (operating_system_file_item.catalog_moid | default(intersight_software_repository_catalog_moid | default('')) | length) > 0
+
+- name: Resolve catalog for {{ operating_system_file_item.name }} by name
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /softwarerepository/Catalogs
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ operating_system_file_item.catalog_name | default(intersight_software_repository_catalog_name | default('')) }}"
+  register: intersight_operating_system_file_catalog_lookup
+  changed_when: false
+  when:
+    - intersight_operating_system_file_catalog_moid_resolved is not defined or intersight_operating_system_file_catalog_moid_resolved | length == 0
+    - (operating_system_file_item.catalog_name | default(intersight_software_repository_catalog_name | default('')) | length) > 0
+
+- name: Capture resolved catalog MOID for {{ operating_system_file_item.name }}
+  ansible.builtin.set_fact:
+    intersight_operating_system_file_catalog_moid_resolved: >-
+      {{ (intersight_operating_system_file_catalog_lookup.stdout | from_json).Moid }}
+  when:
+    - intersight_operating_system_file_catalog_lookup is defined
+    - intersight_operating_system_file_catalog_lookup.stdout is defined
+    - intersight_operating_system_file_catalog_lookup.stdout | length > 0
+
+- name: Validate catalog resolution for {{ operating_system_file_item.name }}
+  ansible.builtin.assert:
+    that:
+      - intersight_operating_system_file_catalog_moid_resolved is defined
+      - intersight_operating_system_file_catalog_moid_resolved | length > 0
+    fail_msg: >-
+      Operating system file {{ operating_system_file_item.name }} requires a
+      software repository catalog. Set catalog_name or catalog_moid in
+      group_vars/all.yml.
+
+
+- name: Build source payload for {{ operating_system_file_item.name }}
+  ansible.builtin.set_fact:
+    intersight_operating_system_file_source_payload: >-
+      {{
+        (
+          operating_system_file_item.source | default({})
+        )
+        if ((operating_system_file_item.source | default({})) | length > 0)
+        else (
+          {
+            'ClassId': 'softwarerepository.HttpServer',
+            'ObjectType': 'softwarerepository.HttpServer',
+            'LocationLink': operating_system_file_item.file_location,
+            'Username': operating_system_file_item.source_username | default('')
+          }
+          | combine(
+              {'Password': operating_system_file_item.source_password}
+              if (operating_system_file_item.source_password | default('') | length > 0)
+              else {},
+              recursive=True
+            )
+        )
+      }}
+
+- name: Build operating system file payload for {{ operating_system_file_item.name }}
+  ansible.builtin.set_fact:
+    intersight_operating_system_file_payload: >-
+      {{
+        {
+          'ClassId': 'softwarerepository.OperatingSystemFile',
+          'ObjectType': 'softwarerepository.OperatingSystemFile',
+          'Name': operating_system_file_item.name,
+          'Description': operating_system_file_item.description | default(''),
+          'Source': intersight_operating_system_file_source_payload,
+          'ImportAction': operating_system_file_item.import_action | default('None'),
+          'Vendor': operating_system_file_item.vendor | default(''),
+          'Version': operating_system_file_item.version | default(''),
+          'Tags': operating_system_file_item.tags | default([])
+        }
+        | combine(
+            {'ReleaseDate': operating_system_file_item.release_date}
+            if (operating_system_file_item.release_date | default('') | length > 0)
+            else {},
+            recursive=True
+          )
+        | combine(
+            {
+              'Catalog': {
+                'Moid': intersight_operating_system_file_catalog_moid_resolved,
+                'ObjectType': 'softwarerepository.Catalog'
+              }
+            }
+            if (
+              intersight_operating_system_file_catalog_moid_resolved is defined and
+              intersight_operating_system_file_catalog_moid_resolved | length > 0
+            )
+            else {},
+            recursive=True
+          )
+        | combine(operating_system_file_item.extra_properties | default({}), recursive=True)
+      }}
+
+- name: Create temp payload file for {{ operating_system_file_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_operating_system_file_payload_file
+
+- name: Write payload for {{ operating_system_file_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_operating_system_file_payload_file.path }}"
+    content: "{{ intersight_operating_system_file_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update operating system file {{ operating_system_file_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /softwarerepository/OperatingSystemFiles
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_operating_system_file_payload_file.path }}"
+      - --name
+      - "{{ operating_system_file_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_operating_system_file_org.api_response.Moid }}"
+  register: intersight_operating_system_file_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ operating_system_file_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_operating_system_file_payload_file.path }}"
+    state: absent
+
+- name: Summarize operating system file {{ operating_system_file_item.name }}
+  ansible.builtin.debug:
+    var: intersight_operating_system_file_result

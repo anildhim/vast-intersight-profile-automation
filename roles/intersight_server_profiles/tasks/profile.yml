@@ -32,6 +32,11 @@
 
 - name: Derive server profiles from {{ server_profile_item.template_name }}
   vars:
+    intersight_profile_serial_numbers: >-
+      {{
+        server_profile_item.serial_numbers
+        | default(intersight_server_serial_numbers | default([]))
+      }}
     intersight_derive_profile_argv: >-
       {{
         [
@@ -48,18 +53,38 @@
           '--base-name',
           (server_profile_item.base_name | default(server_profile_item.template_name)),
           '--count',
-          ((server_profile_item.number_of_profiles | default(intersight_number_of_profiles | default(server_profile_item.count | default(1)))) | string),
+          (
+            (
+              intersight_profile_serial_numbers | length
+            )
+            if (intersight_profile_serial_numbers | length > 0)
+            else
+            (
+              server_profile_item.number_of_profiles
+              | default(intersight_number_of_profiles | default(server_profile_item.count | default(1)))
+            )
+          ) | string,
           '--start-index',
           ((server_profile_item.start_index | default(1)) | string),
           '--organization-moid',
           intersight_server_profile_org_lookup.api_response.Moid,
           '--description',
           (server_profile_item.description | default('')),
+          '--serial-numbers-json',
+          (intersight_profile_serial_numbers | to_json),
           '--tags-json',
           (server_profile_item.tags | default([]) | to_json),
         ]
         +
-        (['--auto-start-index'] if (server_profile_item.auto_start_index | default(false) | bool) else [])
+        (
+          ['--auto-start-index']
+          if (
+            (server_profile_item.auto_start_index | default(false) | bool)
+            and
+            (intersight_profile_serial_numbers | length == 0)
+          )
+          else []
+        )
       }}
   ansible.builtin.command:
     argv: "{{ intersight_derive_profile_argv }}"
@@ -67,6 +92,35 @@
   changed_when: >-
     intersight_derived_server_profile_result.stdout | default('') | length > 0 and
     ((intersight_derived_server_profile_result.stdout | from_json).changed | default(false))
+
+- name: Track derived profile names from {{ server_profile_item.template_name }}
+  ansible.builtin.set_fact:
+    intersight_derived_profile_names: >-
+      {{
+        (intersight_derived_profile_names | default([]))
+        + ((intersight_derived_server_profile_result.stdout | from_json).target_profile_names | default([]))
+      }}
+
+- name: Ensure profile artifact directory exists
+  ansible.builtin.file:
+    path: "{{ intersight_server_profile_artifact_path | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: Persist derived profile artifact
+  ansible.builtin.copy:
+    dest: "{{ intersight_server_profile_artifact_path }}"
+    mode: "0600"
+    content: >-
+      {{
+        {
+          'organization': server_profile_item.organization | default(intersight_organization),
+          'template_name': server_profile_item.template_name,
+          'base_name': server_profile_item.base_name | default(server_profile_item.template_name),
+          'target_profile_names': intersight_derived_profile_names,
+          'last_result': (intersight_derived_server_profile_result.stdout | from_json)
+        } | to_nice_json
+      }}
 
 - name: Summarize derived profiles from {{ server_profile_item.template_name }}
   ansible.builtin.debug:

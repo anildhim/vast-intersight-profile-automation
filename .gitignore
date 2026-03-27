@@ -1,1 +1,5 @@
 .intersight.local.yml
+artifacts/
+payloads/server-profile-deploy-*.json
+__pycache__/
+*.pyc

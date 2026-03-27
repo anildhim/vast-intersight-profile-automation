@@ -1,4 +1,13 @@
 ---
+- name: Initialize assignment inputs
+  ansible.builtin.set_fact:
+    intersight_server_profile_assignment_requests: >-
+      {{
+        intersight_server_profile_assignments
+        if (intersight_server_profile_assignments | default([]) | length > 0)
+        else (intersight_server_profile_deployments | default([]))
+      }}
+
 - name: Validate required Intersight API settings
   ansible.builtin.assert:
     that:
@@ -6,21 +15,61 @@
       - intersight_api_private_key_path | length > 0
       - intersight_api_endpoint | length > 0
       - intersight_organization | length > 0
-      - intersight_server_profiles | length > 0
+      - >-
+        (intersight_server_profiles | default([]) | length > 0)
+        or
+        (
+          (intersight_server_profile_assign_enabled | default(true) | bool)
+          and
+          (intersight_server_profile_assignment_requests | default([]) | length > 0)
+        )
+        or
+        (
+          (intersight_server_profile_assign_enabled | default(true) | bool)
+          and
+          (intersight_server_serial_numbers | default([]) | length > 0)
+        )
     fail_msg: >-
       Missing required Intersight configuration. Export INTERSIGHT_API_KEY_ID and
-      INTERSIGHT_API_PRIVATE_KEY_PATH, then update group_vars/all.yml with your profiles.
+      INTERSIGHT_API_PRIVATE_KEY_PATH, then update group_vars/all.yml with your profiles, assignments, or serial numbers.
 
 - name: Validate server profile definitions
   ansible.builtin.assert:
     that:
       - item.template_name is string
       - item.template_name | length > 0
-      - (item.number_of_profiles | default(intersight_number_of_profiles | default(item.count | default(1))) | int) > 0
+      - >-
+        (
+          (
+            item.serial_numbers
+            | default(intersight_server_serial_numbers | default([]))
+            | length
+          ) > 0
+        )
+        or
+        (
+          item.number_of_profiles
+          | default(intersight_number_of_profiles | default(item.count | default(1)))
+          | int
+        ) > 0
     fail_msg: "Each server profile entry must define template_name and number_of_profiles >= 1."
-  loop: "{{ intersight_server_profiles }}"
+  loop: "{{ intersight_server_profiles | default([]) }}"
   loop_control:
     label: "{{ item.template_name }}"
+  when: intersight_server_profiles | default([]) | length > 0
+
+- name: Validate explicit server profile assignments
+  ansible.builtin.assert:
+    that:
+      - item.profile_name | length > 0
+      - item.server_serial_number | length > 0
+    fail_msg: "Each server profile assignment must define profile_name and server_serial_number."
+  loop: "{{ intersight_server_profile_assignment_requests | default([]) }}"
+  loop_control:
+    label: "{{ item.profile_name | default('assignment') }}"
+  when:
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_server_profile_assignment_requests | default([]) | length > 0
 
 - name: Show profile plan
   ansible.builtin.debug:
@@ -31,9 +80,28 @@
       - "Start index: {{ item.start_index | default(1) }}"
       - "Auto start index: {{ item.auto_start_index | default(false) }}"
       - "Description: {{ item.description | default('') }}"
-  loop: "{{ intersight_server_profiles }}"
+  loop: "{{ intersight_server_profiles | default([]) }}"
   loop_control:
     label: "{{ item.template_name }}"
+  when: intersight_server_profiles | default([]) | length > 0
+
+- name: Show assign-server plan
+  ansible.builtin.debug:
+    msg:
+      - "Explicit assignments: {{ intersight_server_profile_assignment_requests | default([]) | length }}"
+      - "Serial-only assignments: {{ intersight_server_serial_numbers | default([]) | length }}"
+  when: >-
+    (
+      (intersight_server_profile_assign_enabled | default(true) | bool)
+      and
+      (intersight_server_profile_assignment_requests | default([]) | length > 0)
+    )
+    or
+    (
+      (intersight_server_profile_assign_enabled | default(true) | bool)
+      and
+      (intersight_server_serial_numbers | default([]) | length > 0)
+    )
 
 - name: Stop before live profile changes unless explicitly enabled
   ansible.builtin.assert:
@@ -43,13 +111,134 @@
       Live Intersight changes are disabled. Set intersight_apply_changes: true
       in .intersight.local.yml only when you want to modify your account.
 
+- name: Initialize derived profile tracking
+  ansible.builtin.set_fact:
+    intersight_derived_profile_names: []
+
+- name: Check for existing derived profile artifact
+  ansible.builtin.stat:
+    path: "{{ intersight_server_profile_artifact_path }}"
+  register: intersight_server_profile_artifact_stat
+  when:
+    - intersight_server_profiles | default([]) | length == 0
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_server_serial_numbers | default([]) | length > 0
+    - intersight_server_profile_assignment_requests | default([]) | length == 0
+
+- name: Load derived profile artifact
+  ansible.builtin.slurp:
+    path: "{{ intersight_server_profile_artifact_path }}"
+  register: intersight_server_profile_artifact_raw
+  when:
+    - intersight_server_profile_artifact_stat is defined
+    - intersight_server_profile_artifact_stat.stat.exists | default(false)
+
+- name: Validate derived profile artifact organization
+  ansible.builtin.assert:
+    that:
+      - ((intersight_server_profile_artifact_raw.content | b64decode) | from_json).organization | default('') == intersight_organization
+    fail_msg: >-
+      The derived profile artifact at {{ intersight_server_profile_artifact_path }} belongs to
+      organization {{ ((intersight_server_profile_artifact_raw.content | b64decode) | from_json).organization | default('unknown') }},
+      not {{ intersight_organization }}. Run the derive flow again for the target organization or
+      provide explicit profile names.
+  when:
+    - intersight_server_profile_artifact_raw is defined
+    - intersight_server_profile_artifact_raw.content is defined
+
+- name: Restore derived profile names from artifact
+  ansible.builtin.set_fact:
+    intersight_derived_profile_names: >-
+      {{ ((intersight_server_profile_artifact_raw.content | b64decode) | from_json).target_profile_names | default([]) }}
+  when:
+    - intersight_server_profile_artifact_raw is defined
+    - intersight_server_profile_artifact_raw.content is defined
+
 - name: Build each derived server profile set
   ansible.builtin.include_tasks: profile.yml
-  loop: "{{ intersight_server_profiles }}"
+  loop: "{{ intersight_server_profiles | default([]) }}"
   loop_control:
     loop_var: server_profile_item
     label: "{{ server_profile_item.template_name }}"
+  when: intersight_server_profiles | default([]) | length > 0
+
+- name: Validate there are enough derived profiles for serial-only assignment
+  ansible.builtin.assert:
+    that:
+      - (intersight_server_serial_numbers | length) <= (intersight_derived_profile_names | length)
+    fail_msg: >-
+      Serial-only assignment mode requires at least as many derived profiles as
+      serial numbers. Derived profiles: {{ intersight_derived_profile_names | length }},
+      serial numbers: {{ intersight_server_serial_numbers | length }}.
+  when:
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_server_profile_assignment_requests | default([]) | length == 0
+    - intersight_server_serial_numbers | default([]) | length > 0
+
+- name: Initialize effective assignments
+  ansible.builtin.set_fact:
+    intersight_effective_server_profile_assignments: []
+
+- name: Initialize assigned profile tracking
+  ansible.builtin.set_fact:
+    intersight_assigned_server_profiles: []
+
+- name: Build serial-only assignment mappings
+  ansible.builtin.set_fact:
+    intersight_effective_server_profile_assignments: >-
+      {{
+        (intersight_effective_server_profile_assignments | default([]))
+        + [
+            {
+              'profile_name': intersight_derived_profile_names[serial_index],
+              'server_serial_number': item
+            }
+          ]
+      }}
+  loop: "{{ intersight_server_serial_numbers | default([]) }}"
+  loop_control:
+    index_var: serial_index
+  when:
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_server_profile_assignment_requests | default([]) | length == 0
+    - intersight_server_serial_numbers | default([]) | length > 0
+
+- name: Use explicit assignments when provided
+  ansible.builtin.set_fact:
+    intersight_effective_server_profile_assignments: "{{ intersight_server_profile_assignment_requests }}"
+  when:
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_server_profile_assignment_requests | default([]) | length > 0
+
+- name: Assign servers to server profiles
+  ansible.builtin.include_tasks: assign_profile.yml
+  loop: "{{ intersight_effective_server_profile_assignments | default([]) }}"
+  loop_control:
+    loop_var: server_profile_assignment_item
+    label: "{{ server_profile_assignment_item.profile_name }} -> {{ server_profile_assignment_item.server_serial_number }}"
+  when:
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_effective_server_profile_assignments | default([]) | length > 0
+
+- name: Fail after processing all assignment requests when any assignment failed
+  ansible.builtin.assert:
+    that:
+      - >-
+        (
+          intersight_assigned_server_profiles
+          | default([])
+          | selectattr('success', 'equalto', false)
+          | list
+          | length
+        ) == 0
+    fail_msg: >-
+      One or more server profile assignments failed. Check
+      {{ intersight_server_profile_assign_artifact_path | default((playbook_dir | default('.')) ~ '/../artifacts/assigned_server_profiles.json') }}
+      for per-profile status and error details.
+  when:
+    - intersight_server_profile_assign_enabled | default(true) | bool
+    - intersight_assigned_server_profiles | default([]) | length > 0
 
 - name: Summarize changes
   ansible.builtin.debug:
-    msg: "Derived server profile flow completed."
+    msg: "Server profile flow completed."

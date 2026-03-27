@@ -1,0 +1,168 @@
+---
+- name: Deploy Cisco Intersight server profiles
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Load local Intersight overrides if present
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../.intersight.local.yml"
+      ignore_errors: true
+
+
+    - name: Force deploy-only mode
+      ansible.builtin.set_fact:
+        intersight_server_profiles: []
+        intersight_server_profile_assignments: []
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Initialize deployed profile tracking
+      ansible.builtin.set_fact:
+        intersight_deployed_server_profiles: []
+        intersight_profiles_pending_monitor: []
+        intersight_effective_server_profile_deploy_wait: "{{ intersight_server_profile_deploy_wait | default(true) | bool }}"
+        intersight_effective_server_profile_deploy_wait_initial_delay_seconds: "{{ intersight_server_profile_deploy_wait_initial_delay_seconds | default(300) | int }}"
+        intersight_effective_server_profile_deploy_wait_poll_seconds: "{{ intersight_server_profile_deploy_wait_poll_seconds | default(60) | int }}"
+        intersight_effective_server_profile_deploy_wait_timeout_seconds: "{{ intersight_server_profile_deploy_wait_timeout_seconds | default(1800) | int }}"
+        intersight_effective_server_profile_deploy_artifact_path: "{{ intersight_server_profile_deploy_artifact_path | default((playbook_dir | default('.')) ~ '/../artifacts/deployed_server_profiles.json') }}"
+
+    - name: Check for assignment artifact when deploy names are not provided
+      ansible.builtin.stat:
+        path: "{{ intersight_server_profile_assign_artifact_path | default((playbook_dir | default('.')) ~ '/../artifacts/assigned_server_profiles.json') }}"
+      register: intersight_server_profile_deploy_assign_artifact_stat
+      when: intersight_server_profile_deploy_profile_names | default([]) | length == 0
+
+    - name: Load assignment artifact for deploy fallback
+      ansible.builtin.slurp:
+        path: "{{ intersight_server_profile_assign_artifact_path | default((playbook_dir | default('.')) ~ '/../artifacts/assigned_server_profiles.json') }}"
+      register: intersight_server_profile_deploy_assign_artifact_raw
+      when:
+        - intersight_server_profile_deploy_profile_names | default([]) | length == 0
+        - intersight_server_profile_deploy_assign_artifact_stat.stat.exists | default(false)
+
+    - name: Validate assignment artifact organization for deploy fallback
+      ansible.builtin.assert:
+        that:
+          - ((intersight_server_profile_deploy_assign_artifact_raw.content | b64decode) | from_json).organization | default('') == intersight_organization
+        fail_msg: >-
+          The assignment artifact at {{ intersight_server_profile_assign_artifact_path | default((playbook_dir | default('.')) ~ '/../artifacts/assigned_server_profiles.json') }} belongs to
+          organization {{ ((intersight_server_profile_deploy_assign_artifact_raw.content | b64decode) | from_json).organization | default('unknown') }},
+          not {{ intersight_organization }}. Run the derive flow again for the target organization or
+          rerun assignment for the target organization, or provide explicit deploy profile names.
+      when:
+        - intersight_server_profile_deploy_profile_names | default([]) | length == 0
+        - intersight_server_profile_deploy_assign_artifact_raw is defined
+        - intersight_server_profile_deploy_assign_artifact_raw.content is defined
+
+    - name: Determine effective deploy profile names
+      ansible.builtin.set_fact:
+        intersight_effective_server_profile_deploy_names: >-
+          {{
+            intersight_server_profile_deploy_profile_names
+            if (intersight_server_profile_deploy_profile_names | default([]) | length > 0)
+            else (
+              (
+                ((intersight_server_profile_deploy_assign_artifact_raw.content | b64decode) | from_json).profiles
+                | default([])
+                | selectattr('success', 'equalto', true)
+                | selectattr('status', 'equalto', 'Assigned')
+                | map(attribute='profile_name')
+                | list
+              )
+              | default([])
+            )
+            if (
+              intersight_server_profile_deploy_assign_artifact_raw is defined
+              and intersight_server_profile_deploy_assign_artifact_raw.content is defined
+            )
+            else []
+          }}
+
+    - name: Validate deploy profile inputs
+      ansible.builtin.assert:
+        that:
+          - intersight_api_key_id | length > 0
+          - intersight_api_private_key_path | length > 0
+          - intersight_api_endpoint | length > 0
+          - intersight_organization | length > 0
+          - intersight_effective_server_profile_deploy_names | default([]) | length > 0
+        fail_msg: >-
+          Missing required deploy-profile inputs. Set credentials and provide
+          intersight_server_profile_deploy_profile_names, or run the assign flow first so the
+          assignment artifact can supply the successfully assigned profile names automatically.
+
+    - name: Show deploy-profile plan
+      ansible.builtin.debug:
+        msg:
+          - "Profiles to deploy: {{ intersight_effective_server_profile_deploy_names | length }}"
+          - "Proceed on reboot: {{ intersight_server_profile_proceed_on_reboot | bool }}"
+
+    - name: Stop before live profile changes unless explicitly enabled
+      ansible.builtin.assert:
+        that:
+          - intersight_apply_changes | bool
+        fail_msg: >-
+          Live Intersight changes are disabled. Set intersight_apply_changes: true
+          in .intersight.local.yml only when you want to modify your account.
+
+    - name: Resolve organization prerequisites
+      ansible.builtin.include_role:
+        name: intersight_organization
+
+    - name: Kick off deploy requests for server profiles
+      ansible.builtin.include_tasks: ../roles/intersight_server_profiles/tasks/deploy_profile_kickoff.yml
+      loop: "{{ intersight_effective_server_profile_deploy_names }}"
+      loop_control:
+        loop_var: server_profile_deploy_item
+        label: "{{ server_profile_deploy_item }}"
+
+    - name: Wait before first deploy status check for batch
+      ansible.builtin.pause:
+        seconds: "{{ intersight_effective_server_profile_deploy_wait_initial_delay_seconds | int }}"
+      when:
+        - intersight_effective_server_profile_deploy_wait | bool
+        - intersight_profiles_pending_monitor | default([]) | length > 0
+
+    - name: Monitor deploy status for server profiles
+      ansible.builtin.include_tasks: ../roles/intersight_server_profiles/tasks/deploy_profile_monitor.yml
+      loop: "{{ intersight_profiles_pending_monitor | default([]) }}"
+      loop_control:
+        loop_var: server_profile_deploy_item
+        label: "{{ server_profile_deploy_item }}"
+
+    - name: Ensure deploy artifact directory exists
+      ansible.builtin.file:
+        path: "{{ intersight_effective_server_profile_deploy_artifact_path | dirname }}"
+        state: directory
+        mode: "0755"
+
+    - name: Persist deployed profile artifact
+      ansible.builtin.copy:
+        dest: "{{ intersight_effective_server_profile_deploy_artifact_path }}"
+        mode: "0600"
+        content: >-
+          {{
+            {
+              'organization': intersight_organization,
+              'profiles': intersight_deployed_server_profiles | default([]),
+              'count': intersight_deployed_server_profiles | default([]) | length
+            } | to_nice_json
+          }}
+
+    - name: Fail after processing all deploy requests when any deployment failed
+      ansible.builtin.assert:
+        that:
+          - >-
+            (
+              intersight_deployed_server_profiles
+              | default([])
+              | selectattr('success', 'equalto', false)
+              | list
+              | length
+            ) == 0
+        fail_msg: >-
+          One or more server profile deployments failed. Check
+          {{ intersight_effective_server_profile_deploy_artifact_path }}
+          for per-profile status and error details.
+      when: intersight_deployed_server_profiles | default([]) | length > 0

@@ -112,10 +112,17 @@ def main():
     )
     results = existing.get("Results") or []
     if args.organization_moid:
-        results = [
-            item for item in results
-            if (item.get("Organization") or {}).get("Moid") == args.organization_moid
-        ]
+        filtered_results = []
+        for item in results:
+            organization_moid = (item.get("Organization") or {}).get("Moid")
+            permission_resource_moids = {
+                ref.get("Moid")
+                for ref in (item.get("PermissionResources") or [])
+                if ref.get("Moid")
+            }
+            if organization_moid == args.organization_moid or args.organization_moid in permission_resource_moids:
+                filtered_results.append(item)
+        results = filtered_results
     if results:
       moid = results[0]["Moid"]
       _, response = request_json(
