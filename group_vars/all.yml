@@ -73,6 +73,8 @@ intersight_policy_lookup_map:
     resource_path: "/kvm/Policies"
   storage:
     resource_path: "/storage/StoragePolicies"
+  thermal:
+    resource_path: "/thermal/Policies"
 
 # This section mirrors the manually built template shown in Intersight.
 # We know the attached policy names from the summary view; the detailed policy
@@ -92,6 +94,7 @@ intersight_server_profile_templates:
       serial_over_lan: "{{ intersight_policy_name_prefix }}vast-sol"
       virtual_kvm: "{{ intersight_policy_name_prefix }}vast-vkvm"
       storage: "{{ intersight_policy_name_prefix }}vast-storage"
+      thermal: "{{ intersight_policy_name_prefix }}vast-thermal"
 
 # General-purpose policy catalog. Other users/customers can change names and
 # values here while reusing the same playbook structure.
@@ -187,6 +190,11 @@ intersight_policy_catalog:
           controller_slot: "MSTOR-RAID-1"
         raid0_drive:
           enabled: false
+  thermal:
+    - name: "{{ intersight_policy_name_prefix }}vast-thermal"
+      description: "Thermal policy for standalone rack server template"
+      settings:
+        fan_control_mode: "HighPower"
 
 # Example server profiles. Replace these with your real policy names and profile inputs.
 intersight_server_profiles:

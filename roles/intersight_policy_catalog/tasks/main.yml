@@ -115,11 +115,18 @@
     loop_var: storage_policy_item
     label: "{{ storage_policy_item.name }}"
 
+- name: Create or update thermal policies
+  ansible.builtin.include_tasks: thermal.yml
+  loop: "{{ intersight_policy_catalog.thermal | default([]) }}"
+  loop_control:
+    loop_var: thermal_policy_item
+    label: "{{ thermal_policy_item.name }}"
+
 - name: Placeholder for unsupported policy creation tasks
   ansible.builtin.debug:
     msg: >-
       Create or update the {{ item.key }} policies here after we capture the
       detailed policy settings from Intersight.
-  loop: "{{ intersight_policy_catalog | dict2items | rejectattr('key', 'in', ['bios', 'boot_order', 'power', 'local_user', 'ipmi_over_lan', 'serial_over_lan', 'virtual_kvm', 'storage']) | list }}"
+  loop: "{{ intersight_policy_catalog | dict2items | rejectattr('key', 'in', ['bios', 'boot_order', 'power', 'local_user', 'ipmi_over_lan', 'serial_over_lan', 'virtual_kvm', 'storage', 'thermal']) | list }}"
   loop_control:
     label: "{{ item.key }}"

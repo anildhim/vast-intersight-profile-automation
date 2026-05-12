@@ -332,6 +332,7 @@ The policy catalog currently builds these standalone policies:
 - Serial over LAN
 - Virtual KVM
 - Storage
+- Thermal
 
 Policy names are driven by `intersight_policy_name_prefix`. By default they are created as:
 
@@ -343,8 +344,12 @@ Policy names are driven by `intersight_policy_name_prefix`. By default they are 
 - `auto-vast-sol`
 - `auto-vast-vkvm`
 - `auto-vast-storage`
+- `auto-vast-thermal`
 
 These policy definitions live in `group_vars/all.yml` under `intersight_policy_catalog`.
+
+With the current defaults, the Thermal Policy is created as `auto-vast-thermal`
+with `FanControlMode: HighPower`.
 
 Build the full policy set with:
 
@@ -370,6 +375,7 @@ You can also run the targeted policy test playbooks individually:
 - `playbooks/test_auto_vkvm.yml`
 - `playbooks/test_auto_ipmi.yml`
 - `playbooks/test_auto_local_user.yml`
+- `playbooks/test_auto_thermal.yml`
 
 ## 3. Template baseline
 
@@ -392,6 +398,9 @@ The current template input is in `group_vars/all.yml` under `intersight_server_p
 By default the template name is:
 
 - `auto-vast-template`
+
+With the current defaults, this template attaches the full baseline policy set,
+including `auto-vast-thermal`.
 
 Build the full standalone baseline, including template:
 

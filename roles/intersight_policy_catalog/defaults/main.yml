@@ -8,3 +8,4 @@ intersight_policy_types_required:
   - serial_over_lan
   - virtual_kvm
   - storage
+  - thermal

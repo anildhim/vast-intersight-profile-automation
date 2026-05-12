@@ -1,0 +1,60 @@
+---
+- name: Validate thermal policy inputs for {{ thermal_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - thermal_policy_item.name | length > 0
+      - thermal_policy_item.settings is mapping
+      - thermal_policy_item.settings.fan_control_mode | length > 0
+    fail_msg: "Thermal policy {{ thermal_policy_item.name }} is missing required settings."
+
+- name: Build thermal policy payload for {{ thermal_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_thermal_policy_payload:
+      Name: "{{ thermal_policy_item.name }}"
+      Description: "{{ thermal_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      FanControlMode: "{{ thermal_policy_item.settings.fan_control_mode }}"
+
+- name: Create temp payload file for {{ thermal_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_thermal_payload_file
+
+- name: Write payload for {{ thermal_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_thermal_payload_file.path }}"
+    content: "{{ intersight_thermal_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update thermal policy {{ thermal_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /thermal/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_thermal_payload_file.path }}"
+      - --name
+      - "{{ thermal_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_thermal_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ thermal_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_thermal_payload_file.path }}"
+    state: absent
+
+- name: Summarize thermal policy {{ thermal_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_thermal_policy_result
