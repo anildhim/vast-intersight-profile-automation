@@ -14,20 +14,27 @@
   when: (local_user_policy_item.organization | default(intersight_organization)) == intersight_organization
 
 - name: Look up local user policy source organization for {{ local_user_policy_item.name }}
-  cisco.intersight.intersight_rest_api:
-    api_private_key: "{{ intersight_api_private_key_path }}"
-    api_key_id: "{{ intersight_api_key_id }}"
-    api_uri: "{{ intersight_api_endpoint }}/api/v1"
-    validate_certs: "{{ intersight_validate_certs }}"
-    resource_path: "/organization/Organizations"
-    query_params:
-      $filter: "Name eq '{{ local_user_policy_item.organization }}'"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /organization/Organizations
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ local_user_policy_item.organization }}"
   register: intersight_local_user_policy_org_lookup
+  changed_when: false
   when: (local_user_policy_item.organization | default(intersight_organization)) != intersight_organization
 
 - name: Use source organization MOID for {{ local_user_policy_item.name }}
   ansible.builtin.set_fact:
-    intersight_local_user_policy_org_moid: "{{ intersight_local_user_policy_org_lookup.api_response.Moid }}"
+    intersight_local_user_policy_org_moid: "{{ (intersight_local_user_policy_org_lookup.stdout | from_json).Moid }}"
   when: (local_user_policy_item.organization | default(intersight_organization)) != intersight_organization
 
 - name: Build local user policy payload for {{ local_user_policy_item.name }}

@@ -20,20 +20,27 @@
   when: intersight_template_policy_org_name == (template_item.organization | default(intersight_organization))
 
 - name: Look up source organization MOID for {{ template_item.name }} -> {{ policy_item.key }}
-  cisco.intersight.intersight_rest_api:
-    api_private_key: "{{ intersight_api_private_key_path }}"
-    api_key_id: "{{ intersight_api_key_id }}"
-    api_uri: "{{ intersight_api_endpoint }}/api/v1"
-    validate_certs: "{{ intersight_validate_certs }}"
-    resource_path: "/organization/Organizations"
-    query_params:
-      $filter: "Name eq '{{ intersight_template_policy_org_name }}'"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /organization/Organizations
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ intersight_template_policy_org_name }}"
   register: intersight_template_policy_org_lookup
+  changed_when: false
   when: intersight_template_policy_org_name != (template_item.organization | default(intersight_organization))
 
 - name: Capture source organization MOID for {{ template_item.name }} -> {{ policy_item.key }}
   ansible.builtin.set_fact:
-    intersight_template_policy_org_moid: "{{ intersight_template_policy_org_lookup.api_response.Moid }}"
+    intersight_template_policy_org_moid: "{{ (intersight_template_policy_org_lookup.stdout | from_json).Moid }}"
   when: intersight_template_policy_org_name != (template_item.organization | default(intersight_organization))
 
 - name: Resolve policy object for {{ template_item.name }} -> {{ policy_item.key }}

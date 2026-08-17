@@ -24,24 +24,34 @@
   when: intersight_organization_moid | length > 0
 
 - name: Look up target organization by name
-  cisco.intersight.intersight_rest_api:
-    api_private_key: "{{ intersight_api_private_key_path }}"
-    api_key_id: "{{ intersight_api_key_id }}"
-    api_uri: "{{ intersight_api_endpoint }}/api/v1"
-    validate_certs: "{{ intersight_validate_certs }}"
-    resource_path: "/organization/Organizations"
-    query_params:
-      $filter: "Name eq '{{ intersight_organization }}'"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /organization/Organizations
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ intersight_organization }}"
   register: intersight_target_org_lookup
+  changed_when: false
+  failed_when: false
   when: intersight_organization_moid | length == 0
 
 - name: Use existing organization MOID
   ansible.builtin.set_fact:
-    intersight_resolved_organization_moid: "{{ intersight_target_org_lookup.api_response.Moid }}"
+    intersight_resolved_organization_moid: "{{ (intersight_target_org_lookup.stdout | from_json).Moid }}"
   when:
     - intersight_organization_moid | length == 0
-    - intersight_target_org_lookup.api_response is defined
-    - intersight_target_org_lookup.api_response.Moid is defined
+    - intersight_target_org_lookup.rc is defined
+    - intersight_target_org_lookup.rc == 0
+    - intersight_target_org_lookup.stdout is defined
+    - intersight_target_org_lookup.stdout | length > 0
 
 - name: Stop when organization is missing and live changes are disabled
   ansible.builtin.assert:
@@ -119,15 +129,22 @@
     - intersight_target_org_create.stdout | length > 0
 
 - name: Refresh newly created organization by name
-  cisco.intersight.intersight_rest_api:
-    api_private_key: "{{ intersight_api_private_key_path }}"
-    api_key_id: "{{ intersight_api_key_id }}"
-    api_uri: "{{ intersight_api_endpoint }}/api/v1"
-    validate_certs: "{{ intersight_validate_certs }}"
-    resource_path: "/organization/Organizations"
-    query_params:
-      $filter: "Name eq '{{ intersight_organization }}'"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /organization/Organizations
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ intersight_organization }}"
   register: intersight_target_org_refresh
+  changed_when: false
   when:
     - intersight_target_org_create is defined
     - intersight_target_org_create.stdout is defined
@@ -135,11 +152,11 @@
 
 - name: Update resolved organization MOID from refresh result
   ansible.builtin.set_fact:
-    intersight_resolved_organization_moid: "{{ intersight_target_org_refresh.api_response.Moid }}"
+    intersight_resolved_organization_moid: "{{ (intersight_target_org_refresh.stdout | from_json).Moid }}"
   when:
     - intersight_target_org_refresh is defined
-    - intersight_target_org_refresh.api_response is defined
-    - intersight_target_org_refresh.api_response.Moid is defined
+    - intersight_target_org_refresh.stdout is defined
+    - intersight_target_org_refresh.stdout | length > 0
 
 - name: Reapply organization metadata after create
   cisco.intersight.intersight_rest_api:
@@ -159,15 +176,22 @@
     - intersight_target_org_create.stdout | length > 0
 
 - name: Look up default organization for sharing
-  cisco.intersight.intersight_rest_api:
-    api_private_key: "{{ intersight_api_private_key_path }}"
-    api_key_id: "{{ intersight_api_key_id }}"
-    api_uri: "{{ intersight_api_endpoint }}/api/v1"
-    validate_certs: "{{ intersight_validate_certs }}"
-    resource_path: "/organization/Organizations"
-    query_params:
-      $filter: "Name eq '{{ intersight_default_organization_name }}'"
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /organization/Organizations
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ intersight_default_organization_name }}"
   register: intersight_default_org_lookup
+  changed_when: false
   when:
     - intersight_include_default_organization | bool
     - intersight_organization != intersight_default_organization_name
@@ -175,8 +199,10 @@
 - name: Validate default organization exists for sharing
   ansible.builtin.assert:
     that:
-      - intersight_default_org_lookup.api_response is defined
-      - intersight_default_org_lookup.api_response.Moid is defined
+      - intersight_default_org_lookup.rc is defined
+      - intersight_default_org_lookup.rc == 0
+      - intersight_default_org_lookup.stdout is defined
+      - (intersight_default_org_lookup.stdout | from_json).Moid is defined
     fail_msg: >-
       Default organization {{ intersight_default_organization_name }} was not
       found, so sharing cannot be configured.
@@ -198,7 +224,7 @@
       - --shared-resource-moid
       - "{{ intersight_resolved_organization_moid }}"
       - --shared-with-resource-moid
-      - "{{ intersight_default_org_lookup.api_response.Moid }}"
+      - "{{ (intersight_default_org_lookup.stdout | from_json).Moid }}"
   register: intersight_sharing_rule_result
   changed_when: >-
     intersight_sharing_rule_result.stdout | default('') | length > 0 and

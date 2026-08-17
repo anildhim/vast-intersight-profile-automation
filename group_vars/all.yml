@@ -22,11 +22,10 @@ intersight_software_repository_catalog_name: "user-catalog"
 intersight_software_repository_catalog_moid: ""
 intersight_local_admin_password: "adminvastdata"
 intersight_server_serial_numbers:
+  - "WZP2922A3Y0"
+  - "WZP2922A3XX"
+  - "WZP29249TC9"
   - "WZP2949ACF2"
-  - "WZP2949ACF1"
-  - "WZP2949ACDC"
-  - "WZP2949ACDB"
-  - "WZP2949ACF9"
 intersight_server_profile_assignments: []
 intersight_server_profile_deployments: []
 intersight_server_profile_deploy_profile_names: []

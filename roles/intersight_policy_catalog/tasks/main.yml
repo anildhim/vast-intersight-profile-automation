@@ -48,16 +48,33 @@
   when: intersight_organization_moid | length > 0
 
 - name: Get organization MOID for policy creation
-  cisco.intersight.intersight_rest_api:
-    api_private_key: "{{ intersight_api_private_key_path }}"
-    api_key_id: "{{ intersight_api_key_id }}"
-    api_uri: "{{ intersight_api_endpoint }}/api/v1"
-    validate_certs: "{{ intersight_validate_certs }}"
-    resource_path: "/organization/Organizations"
-    query_params:
-      $filter: "Name eq '{{ intersight_organization }}'"
-  register: intersight_policy_catalog_org
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /organization/Organizations
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --name
+      - "{{ intersight_organization }}"
+  register: intersight_policy_catalog_org_lookup
+  changed_when: false
   when: intersight_organization_moid | length == 0
+
+- name: Capture organization MOID for policy creation
+  ansible.builtin.set_fact:
+    intersight_policy_catalog_org:
+      api_response:
+        Moid: "{{ (intersight_policy_catalog_org_lookup.stdout | from_json).Moid }}"
+  when:
+    - intersight_organization_moid | length == 0
+    - intersight_policy_catalog_org_lookup.stdout is defined
+    - intersight_policy_catalog_org_lookup.stdout | length > 0
 
 - name: Create or update BIOS policies
   ansible.builtin.include_tasks: bios.yml
