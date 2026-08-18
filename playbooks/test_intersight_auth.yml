@@ -1,0 +1,74 @@
+---
+- name: Test Cisco Intersight authentication and key health
+  hosts: localhost
+  gather_facts: false
+  pre_tasks:
+    - name: Load local Intersight overrides if present
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../.intersight.local.yml"
+      ignore_errors: true
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  tasks:
+    - name: Validate required Intersight authentication inputs
+      ansible.builtin.assert:
+        that:
+          - intersight_api_key_id | length > 0
+          - intersight_api_private_key_path | length > 0
+          - intersight_api_endpoint | length > 0
+        fail_msg: >-
+          Missing Intersight authentication inputs. Review .intersight.local.yml
+          or your exported environment variables.
+
+    - name: Confirm private key file exists
+      ansible.builtin.stat:
+        path: "{{ intersight_api_private_key_path }}"
+      register: intersight_private_key_stat
+
+    - name: Fail when private key file is missing
+      ansible.builtin.assert:
+        that:
+          - intersight_private_key_stat.stat.exists | bool
+          - intersight_private_key_stat.stat.isreg | bool
+        fail_msg: >-
+          The private key file {{ intersight_api_private_key_path }} does not
+          exist or is not a regular file.
+
+    - name: Validate private key parses with OpenSSL
+      ansible.builtin.command:
+        argv:
+          - openssl
+          - pkey
+          - -in
+          - "{{ intersight_api_private_key_path }}"
+          - -noout
+      register: intersight_private_key_parse
+      changed_when: false
+
+    - name: Resolve requested organization with signed API lookup
+      ansible.builtin.command:
+        argv:
+          - python3
+          - "{{ playbook_dir }}/../scripts/intersight_lookup_resource.py"
+          - --api-uri
+          - "{{ intersight_api_endpoint }}/api/v1"
+          - --resource-path
+          - /organization/Organizations
+          - --api-key-id
+          - "{{ intersight_api_key_id }}"
+          - --api-private-key
+          - "{{ intersight_api_private_key_path }}"
+          - --name
+          - "{{ intersight_organization }}"
+      register: intersight_auth_org_lookup
+      changed_when: false
+
+    - name: Summarize authentication check
+      ansible.builtin.debug:
+        msg:
+          - "Authentication check passed."
+          - "Endpoint: {{ intersight_api_endpoint }}"
+          - "Organization: {{ (intersight_auth_org_lookup.stdout | from_json).Name }}"
+          - "Organization MOID: {{ (intersight_auth_org_lookup.stdout | from_json).Moid }}"

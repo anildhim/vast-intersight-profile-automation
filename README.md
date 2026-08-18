@@ -72,6 +72,22 @@ You can also use an untracked local vars file:
 2. Put your real credentials there
 3. Run the playbooks normally
 
+Before the first live run in any new Intersight account, run the dedicated
+authentication preflight:
+
+```bash
+cd "$REPO_HOME"
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/test_intersight_auth.yml \
+  -e intersight_organization=default
+```
+
+This preflight does three things:
+
+- validates that the private key file exists
+- validates that OpenSSL can parse the private key
+- performs a signed organization lookup using the repo helper script, which is
+  the same lookup path used by the core workflow
+
 If the private key fails with a deserialize or ASN.1 parsing error, normalize it once and point `.intersight.local.yml` to the cleaned file:
 
 ```bash
@@ -84,6 +100,20 @@ Then set:
 ```yaml
 intersight_api_private_key_path: "$HOME/.intersight/intersight-clean-ec.pem"
 ```
+
+Why this happens:
+
+- Cisco Intersight API keys are EC keys, and different PEM encodings of the
+  same key are not always handled consistently by every Python and Ansible
+  crypto path.
+- A key can parse in one tool and still fail in another with ASN.1 or
+  deserialize errors.
+- A separate failure mode is a 401 from Intersight when the key ID, private
+  key, account, or endpoint region do not match.
+
+The repo is now hardened to avoid the fragile organization lookup path, but
+users should still normalize the private key once and run the preflight before
+their first baseline build in a new account.
 
 ## Fast path
 

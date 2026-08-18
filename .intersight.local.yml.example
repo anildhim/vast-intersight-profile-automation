@@ -1,9 +1,14 @@
 ---
 # Copy this file to .intersight.local.yml and fill in your local values.
 # The real .intersight.local.yml is gitignored.
+# Use a normalized PEM path here. If the downloaded key triggers ASN.1 or
+# deserialize errors, regenerate it with:
+#   openssl ec -in "/path/to/original-private-key.pem" \
+#     -out "$HOME/.intersight/intersight-clean-ec.pem" \
+#     -param_enc named_curve
 
 intersight_api_key_id: "replace-with-your-api-key-id"
-intersight_api_private_key_path: "/tmp/intersight-clean-ec.pem"
+intersight_api_private_key_path: "$HOME/.intersight/intersight-clean-ec.pem"
 intersight_api_endpoint: "https://intersight.com"
 intersight_validate_certs: true
 intersight_apply_changes: false
