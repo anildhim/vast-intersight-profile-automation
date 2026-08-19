@@ -1,0 +1,72 @@
+---
+- name: Validate NTP policy inputs for {{ ntp_policy_item.name }}
+  ansible.builtin.assert:
+    that:
+      - ntp_policy_item.name | length > 0
+      - ntp_policy_item.settings is mapping
+      - ntp_policy_item.settings.enabled is defined
+      - not (ntp_policy_item.settings.enabled | bool) or (ntp_policy_item.settings.ntp_servers | default([]) | length > 0)
+    fail_msg: "NTP policy {{ ntp_policy_item.name }} is missing required settings."
+
+- name: Build NTP policy payload for {{ ntp_policy_item.name }}
+  ansible.builtin.set_fact:
+    intersight_ntp_policy_payload:
+      Name: "{{ ntp_policy_item.name }}"
+      Description: "{{ ntp_policy_item.description | default(omit) }}"
+      Organization:
+        Moid: "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+      Enabled: "{{ ntp_policy_item.settings.enabled | bool }}"
+      NtpServers: "{{ ntp_policy_item.settings.ntp_servers | default([]) }}"
+      Timezone: "{{ ntp_policy_item.settings.timezone | default(omit) }}"
+
+- name: Normalize NTP servers for {{ ntp_policy_item.name }} when disabled
+  ansible.builtin.set_fact:
+    intersight_ntp_policy_payload: >-
+      {{
+        intersight_ntp_policy_payload
+        | combine({'NtpServers': []}, recursive=True)
+      }}
+  when: not (ntp_policy_item.settings.enabled | bool)
+
+- name: Create temp payload file for {{ ntp_policy_item.name }}
+  ansible.builtin.tempfile:
+    state: file
+    suffix: ".json"
+  register: intersight_ntp_payload_file
+
+- name: Write payload for {{ ntp_policy_item.name }}
+  ansible.builtin.copy:
+    dest: "{{ intersight_ntp_payload_file.path }}"
+    content: "{{ intersight_ntp_policy_payload | to_nice_json }}"
+    mode: "0600"
+
+- name: Create or update NTP policy {{ ntp_policy_item.name }}
+  ansible.builtin.command:
+    argv:
+      - python3
+      - "{{ playbook_dir }}/../scripts/intersight_upsert.py"
+      - --api-uri
+      - "{{ intersight_api_endpoint }}/api/v1"
+      - --resource-path
+      - /ntp/Policies
+      - --api-key-id
+      - "{{ intersight_api_key_id }}"
+      - --api-private-key
+      - "{{ intersight_api_private_key_path }}"
+      - --payload-file
+      - "{{ intersight_ntp_payload_file.path }}"
+      - --name
+      - "{{ ntp_policy_item.name }}"
+      - --organization-moid
+      - "{{ intersight_organization_moid if intersight_organization_moid | length > 0 else intersight_policy_catalog_org.api_response.Moid }}"
+  register: intersight_ntp_policy_result
+  changed_when: true
+
+- name: Remove temp payload file for {{ ntp_policy_item.name }}
+  ansible.builtin.file:
+    path: "{{ intersight_ntp_payload_file.path }}"
+    state: absent
+
+- name: Summarize NTP policy {{ ntp_policy_item.name }}
+  ansible.builtin.debug:
+    var: intersight_ntp_policy_result

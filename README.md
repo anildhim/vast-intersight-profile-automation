@@ -363,6 +363,7 @@ The policy catalog currently builds these standalone policies:
 - Virtual KVM
 - Storage
 - Thermal
+- NTP
 
 Policy names are driven by `intersight_policy_name_prefix`. By default they are created as:
 
@@ -375,11 +376,26 @@ Policy names are driven by `intersight_policy_name_prefix`. By default they are 
 - `auto-vast-vkvm`
 - `auto-vast-storage`
 - `auto-vast-thermal`
+- `auto-vast-ntp`
 
 These policy definitions live in `group_vars/all.yml` under `intersight_policy_catalog`.
 
 With the current defaults, the Thermal Policy is created as `auto-vast-thermal`
 with `FanControlMode: HighPower`.
+
+The NTP Policy is also user-driven from `group_vars/all.yml`:
+
+- `intersight_ntp_servers`
+- `intersight_ntp_timezone`
+
+With the current checked-in setup, the NTP Policy uses:
+
+- `intersight_ntp_servers: ["172.22.251.23"]`
+- `intersight_ntp_timezone: "America/Los_Angeles"`
+
+For a generic environment, you can change the NTP server list to values such as:
+
+- `time.google.com`
 
 Build the full policy set with:
 
@@ -406,6 +422,7 @@ You can also run the targeted policy test playbooks individually:
 - `playbooks/test_auto_ipmi.yml`
 - `playbooks/test_auto_local_user.yml`
 - `playbooks/test_auto_thermal.yml`
+- `playbooks/test_auto_ntp.yml`
 
 ## 3. Template baseline
 
@@ -430,7 +447,7 @@ By default the template name is:
 - `auto-vast-template`
 
 With the current defaults, this template attaches the full baseline policy set,
-including `auto-vast-thermal`.
+including `auto-vast-thermal` and `auto-vast-ntp`.
 
 Build the full standalone baseline, including template:
 

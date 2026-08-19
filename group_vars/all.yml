@@ -21,6 +21,9 @@ intersight_software_repository_name_prefix: "auto-"
 intersight_software_repository_catalog_name: "user-catalog"
 intersight_software_repository_catalog_moid: ""
 intersight_local_admin_password: "adminvastdata"
+intersight_ntp_servers:
+  - "172.22.251.23"
+intersight_ntp_timezone: "America/Los_Angeles"
 intersight_server_serial_numbers:
   - "WZP2922A3Y0"
   - "WZP2922A3XX"
@@ -74,6 +77,8 @@ intersight_policy_lookup_map:
     resource_path: "/storage/StoragePolicies"
   thermal:
     resource_path: "/thermal/Policies"
+  ntp:
+    resource_path: "/ntp/Policies"
 
 # This section mirrors the manually built template shown in Intersight.
 # We know the attached policy names from the summary view; the detailed policy
@@ -94,6 +99,7 @@ intersight_server_profile_templates:
       virtual_kvm: "{{ intersight_policy_name_prefix }}vast-vkvm"
       storage: "{{ intersight_policy_name_prefix }}vast-storage"
       thermal: "{{ intersight_policy_name_prefix }}vast-thermal"
+      ntp: "{{ intersight_policy_name_prefix }}vast-ntp"
 
 # General-purpose policy catalog. Other users/customers can change names and
 # values here while reusing the same playbook structure.
@@ -194,6 +200,13 @@ intersight_policy_catalog:
       description: "Thermal policy for standalone rack server template"
       settings:
         fan_control_mode: "HighPower"
+  ntp:
+    - name: "{{ intersight_policy_name_prefix }}vast-ntp"
+      description: "NTP policy for standalone rack server template"
+      settings:
+        enabled: true
+        ntp_servers: "{{ intersight_ntp_servers }}"
+        timezone: "{{ intersight_ntp_timezone }}"
 
 # Example server profiles. Replace these with your real policy names and profile inputs.
 intersight_server_profiles:

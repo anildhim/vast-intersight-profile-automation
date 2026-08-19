@@ -17,6 +17,10 @@
   register: intersight_server_profile_org_lookup
   changed_when: false
 
+- name: Parse organization lookup for {{ server_profile_item.template_name }}
+  ansible.builtin.set_fact:
+    intersight_server_profile_org_lookup_parsed: "{{ intersight_server_profile_org_lookup.stdout | from_json }}"
+
 - name: Resolve template for {{ server_profile_item.template_name }}
   ansible.builtin.command:
     argv:
@@ -33,7 +37,7 @@
       - --name
       - "{{ server_profile_item.template_name }}"
       - --organization-moid
-      - "{{ intersight_server_profile_org_lookup.api_response.Moid }}"
+      - "{{ intersight_server_profile_org_lookup_parsed.Moid }}"
   register: intersight_server_profile_template_lookup
   changed_when: false
 
@@ -74,7 +78,7 @@
           '--start-index',
           ((server_profile_item.start_index | default(1)) | string),
           '--organization-moid',
-          (intersight_server_profile_org_lookup.stdout | from_json).Moid,
+          intersight_server_profile_org_lookup_parsed.Moid,
           '--description',
           (server_profile_item.description | default('')),
           '--serial-numbers-json',
