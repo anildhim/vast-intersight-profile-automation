@@ -1,6 +1,6 @@
-# VAST Intersight Automation for Node Assignment
+# VAST Intersight Automation
 
-`vast-intersight-profile-automation` automates the full Cisco Intersight node-assignment lifecycle for standalone environments.
+`vast-intersight-profile-automation` automates Cisco Intersight standalone server profile lifecycle tasks.
 
 The main workflow on this repository is:
 
@@ -9,6 +9,8 @@ The main workflow on this repository is:
 3. Assign those derived profiles to claimed servers by serial number.
 4. Deploy the successfully assigned profiles in batch.
 5. Capture runtime artifacts for derive, assign, and deploy results.
+
+This same baseline can also be used in profile-only mode when you want to create server profiles in a different Intersight account without assigning them to hardware.
 
 The automation is driven from `group_vars/all.yml`. The policy and template playbooks are still part of the repository, but they exist to support the end-to-end node-assignment and deployment flow described in this README.
 
@@ -177,6 +179,42 @@ cat artifacts/deployed_server_profiles.json
 
 Everything else will use the defaults from `group_vars/all.yml`, including `intersight_server_serial_numbers`.
 
+## Fast path for profile-only creation
+
+Use this path when you want to validate a different Intersight account, build the baseline, and create server profiles without assigning them to servers.
+
+1. Run the authentication preflight:
+
+```bash
+cd "$REPO_HOME"
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/test_intersight_auth.yml \
+  -e intersight_organization=default
+```
+
+2. Build the baseline policies and template:
+
+```bash
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/build_standalone_template.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=default
+```
+
+3. Derive the profiles only:
+
+```bash
+ANSIBLE_LOCAL_TEMP=/tmp ANSIBLE_REMOTE_TEMP=/tmp ansible-playbook playbooks/configure_server_profiles.yml \
+  -e intersight_apply_changes=true \
+  -e intersight_organization=default
+```
+
+4. Review the result:
+
+```bash
+cat artifacts/derived_server_profiles.json
+```
+
+This stops after profile creation. No server assignment is attempted, and no deployment is attempted.
+
 ## Full workflow
 
 1. Configure credentials and endpoint.
@@ -193,6 +231,17 @@ This repository treats these as three separate execution stages on purpose:
 - `configure_server_profiles.yml` derives only
 - `assign_server_profiles.yml` assigns only
 - `deploy_server_profiles.yml` deploys only
+
+For a profile-only workflow in a second Intersight account:
+
+1. Update `.intersight.local.yml` with the new account's API key ID, private key path, and endpoint.
+2. Set `intersight_organization` and `intersight_server_serial_numbers` in `group_vars/all.yml`.
+3. Run `playbooks/test_intersight_auth.yml`.
+4. Run `playbooks/build_standalone_template.yml`.
+5. Run `playbooks/configure_server_profiles.yml`.
+6. Review `artifacts/derived_server_profiles.json`.
+
+Stop there if you do not want server association. Do not run the assign or deploy playbooks.
 
 
 ## Main inputs
@@ -533,7 +582,7 @@ Defaults:
 - `start_index` default is `1`
 - `auto_start_index` default is `true`
 
-So by default the profile flow creates one derived profile starting at the next available suffix.
+So by default the profile flow creates one derived profile starting at the next available suffix when you are not using serial-based naming.
 
 If you also provide `intersight_server_serial_numbers`, the derive-only playbook keeps those values available for naming and creates profiles like `auto-vast-template_WZP2949ACDB` without performing assignment in the same run.
 
